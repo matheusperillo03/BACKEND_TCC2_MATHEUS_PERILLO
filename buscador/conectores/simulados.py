@@ -27,11 +27,22 @@ def transporte_portal(
     servidores: dict[str, list] | None = None,
     falhas_iniciais: int = 0,
     tamanho_pagina: int = 15,
+    cepim: dict[str, list] | None = None,
+    ceaf: dict[str, list] | None = None,
+    convenios: dict[str, list] | None = None,
 ) -> TransporteRotas:
-    """Portal da Transparência: ``ceis``/``cnep`` por CNPJ e ``servidores`` por código SIAPE.
+    """Portal da Transparência: ``ceis``/``cnep``/``cepim``/``convenios`` por CNPJ, ``ceaf`` por
+    nome e ``servidores`` por código SIAPE.
 
     Os dicionários são lidos a cada requisição: o teste pode alterá-los entre duas coletas."""
-    bases = {"ceis": ceis or {}, "cnep": cnep or {}, "servidores": servidores or {}}
+    bases = {
+        "ceis": ceis or {},
+        "cnep": cnep or {},
+        "servidores": servidores or {},
+        "cepim": cepim or {},
+        "ceaf": ceaf or {},
+        "convenios": convenios or {},
+    }
 
     def responder(request: httpx.Request) -> tuple[int, bytes]:
         if not request.headers.get("chave-api-dados"):
@@ -42,6 +53,9 @@ def transporte_portal(
         parametros = request.url.params
         chave = (
             parametros.get("codigoSancionado")
+            or parametros.get("cnpjSancionado")
+            or parametros.get("convenente")
+            or parametros.get("nomeSancionado")
             or parametros.get("orgaoServidorLotacao")
             or parametros.get("orgaoServidorExercicio")
             or ""

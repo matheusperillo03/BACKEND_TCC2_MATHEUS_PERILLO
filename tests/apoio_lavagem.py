@@ -237,3 +237,71 @@ def verificar_explicacao(alerta, sessao) -> None:
         captura = sessao.get(Captura, evidencia["captura_id"])
         assert captura.sha256 == evidencia["sha256"]
         assert captura.url_ou_arquivo.startswith("simulado://")
+
+
+def simples(
+    cenario: Cenario,
+    basico: str,
+    *,
+    mei: str = "S",
+    opcao_mei: str = "20200101",
+    exclusao_mei: str = "00000000",
+) -> None:
+    """Linha sintética da tabela Simples do CNPJ (opção pelo MEI e datas)."""
+    from buscador.conectores.base import RegistroSimples
+
+    cenario.registros.append(
+        RegistroSimples(
+            captura_id=cenario.captura("cnpj_arquivo"),
+            cnpj_basico=basico,
+            opcao_simples="S",
+            data_opcao_simples=opcao_mei,
+            opcao_mei=mei,
+            data_opcao_mei=opcao_mei,
+            data_exclusao_mei=exclusao_mei,
+        )
+    )
+
+
+def convenio(
+    cenario: Cenario,
+    basico: str,
+    vigencia: str = "2026-03-01",
+    *,
+    identificador: str = "1",
+    valor: float = 500_000.0,
+) -> None:
+    from buscador.conectores.base import RegistroConvenio
+
+    cenario.registros.append(
+        RegistroConvenio(
+            captura_id=cenario.captura("portal_transparencia"),
+            id_registro=identificador,
+            cnpj_convenente=cnpj(basico),
+            numero=f"CONVENIO SINTETICO {identificador}/2026",
+            objeto="Objeto sintético de convênio",
+            data_inicio_vigencia=vigencia,
+            data_fim_vigencia="2027-12-31",
+            valor=valor,
+            valor_liberado=valor / 2,
+            situacao="EM EXECUÇÃO",
+            orgao_nome="PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+            orgao_cnpj=CNPJ_ORGAO,
+        )
+    )
+
+
+def expulsao(cenario: Cenario, nome: str, cpf: str, identificador: str = "1") -> None:
+    from buscador.conectores.base import RegistroExpulsao
+
+    cenario.registros.append(
+        RegistroExpulsao(
+            captura_id=cenario.captura("portal_transparencia"),
+            id_registro=identificador,
+            nome=nome,
+            cpf=cpf,
+            tipo_punicao="Demissão",
+            data_publicacao="2024-05-10",
+            orgao_lotacao="ORGAO SINTETICO",
+        )
+    )

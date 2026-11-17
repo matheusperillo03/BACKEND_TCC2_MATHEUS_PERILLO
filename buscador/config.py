@@ -212,6 +212,19 @@ class Configuracao(BaseSettings):
     l15_minimo_categorias: int = Field(default=4, ge=2, le=100)
     # Qualificações de sócio que contam como administração (L3, L10 e L14), por vírgula.
     qualificacoes_administracao: str = "05,10,16,28,49,50,65"
+    # L6 (porte ou MEI incompatível): limites do MEI de outros anos-calendário, em JSON. Vazio =
+    # só a tabela do código (``tipologias.legislacao.LIMITES_MEI``: 2026, 2027 e 2028).
+    # Exemplo: {"2029": {"anual": 150000.00, "mensal_inicio": 12500.00, "fonte": "lei"}}
+    l6_limites_mei: str = ""
+    # Tolerância da transição de limite do MEI: compara o valor do ano com o maior entre o limite
+    # do ano e o do ano seguinte (decisão do autor; ver ``tipologias.lavagem``).
+    l6_tolerancia_transicao: bool = True
+    # L16 (entidade sem fins lucrativos convenente): dias mínimos entre o início da atividade e
+    # o início da vigência, e naturezas jurídicas tratadas como sem fins lucrativos (tabela de
+    # domínio Naturezas do CNPJ: 3069 Fundação Privada, 3301 Organização Social, 3999 Associação
+    # Privada).
+    l16_dias_minimos: int = Field(default=180, ge=0, le=36_500)
+    l16_naturezas_sem_fins_lucrativos: str = "3069,3301,3999"
 
     # ---- Monitoramento contínuo (RF06, H18) ---------------------------------------------------
     # Agendador interno (uma thread do próprio serviço). Com mais de um processo da API, ligue-o
@@ -401,6 +414,10 @@ class Configuracao(BaseSettings):
             administracao = lavagem.lista_de_codigos(
                 self.qualificacoes_administracao, "QUALIFICACOES_ADMINISTRACAO", tamanho=2
             )
+            limites_receita = legislacao.limites_de_receita(self.l6_limites_mei)
+            naturezas = lavagem.lista_de_codigos(
+                self.l16_naturezas_sem_fins_lucrativos, "L16_NATUREZAS_SEM_FINS_LUCRATIVOS"
+            )
         except ValueError as erro:
             raise ErroConfiguracao(str(erro)) from erro
         return {
@@ -418,6 +435,10 @@ class Configuracao(BaseSettings):
             "l15_minimo_cnaes": self.l15_minimo_cnaes,
             "l15_minimo_categorias": self.l15_minimo_categorias,
             "qualificacoes_administracao": administracao,
+            "l6_limites": limites_receita,
+            "l6_tolerancia_transicao": self.l6_tolerancia_transicao,
+            "l16_dias_minimos": self.l16_dias_minimos,
+            "l16_naturezas_sem_fins_lucrativos": naturezas,
             "t1_dias_minimos": self.t1_dias_minimos,
             "t2_minimo_empresas": self.t2_minimo_empresas,
             "t3_razao_minima": self.t3_razao_minima,

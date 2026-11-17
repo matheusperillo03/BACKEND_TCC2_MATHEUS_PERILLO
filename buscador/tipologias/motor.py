@@ -59,6 +59,7 @@ NOMES_PARAMETROS = (
     "l14_valor_minimo",
     "l15_minimo_cnaes",
     "l15_minimo_categorias",
+    "l16_dias_minimos",
 )
 # Decimais que precisam ser maiores que zero.
 _PARAMETROS_DECIMAIS = ("t3_razao_minima", "t8_percentual_limite", "t8_percentual_limite_reforma")
@@ -606,6 +607,7 @@ _LIMITES_PARAMETROS = {
     "l14_valor_minimo": (0.0, 1e12),
     "l15_minimo_cnaes": (2, 1_000),
     "l15_minimo_categorias": (2, 100),
+    "l16_dias_minimos": (0, 36_500),
 }
 
 

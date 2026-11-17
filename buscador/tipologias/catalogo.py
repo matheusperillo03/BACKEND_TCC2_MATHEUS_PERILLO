@@ -136,6 +136,17 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
         ["cnpj_arquivo"],
         [],
     ),
+    "L6": (
+        "H43",
+        "Soma do valor dos contratos assinados no ano-calendário (valor inicial; sem ele, o "
+        "global) acima do limite legal de receita do regime: MEI pela tabela Simples e pelas "
+        "datas de opção e de exclusão; microempresa e pequeno porte pelo porte do cadastro.",
+        "Velasco et al. (2021), seção 3.2; Carta Circular BCB nº 4.001/2020, III, n. Limites: "
+        "LC nº 123/2006, arts. 3º e 18-A, e LC nº 238/2026, arts. 2º e 10 (MEI: R$ 81.000,00 até "
+        "2026, R$ 110.000,00 em 2027 e R$ 140.000,00 a partir de 2028).",
+        ["cnpj_arquivo (com a tabela Simples)", "pncp"],
+        ["l6_limites", "l6_tolerancia_transicao"],
+    ),
     "L7": (
         "H44",
         "Contratada em que nenhum sócio atual entrou até X dias depois do início da atividade e "
@@ -157,10 +168,12 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
     "L10": (
         "H47",
         "Contratada sem sanção própria vigente que divide sócio-administrador provável ou "
-        "endereço normalizado com empresa de sanção vigente na data do contrato.",
+        "endereço normalizado com empresa de sanção vigente na data do contrato (CEIS, CNEP) ou "
+        "com entidade impedida (CEPIM); ou sócio de contratada ou convenente que possivelmente "
+        "coincide com pessoa expulsa da administração federal (CEAF).",
         _GAFI_EGMONT + ", item 3; Velasco et al. (2021), seção 3; Lei nº 12.846/2013, art. 5º, "
         "IV, e.",
-        ["cnpj_arquivo", "pncp", "portal_transparencia (ceis, cnep)"],
+        ["cnpj_arquivo", "pncp", "portal_transparencia (ceis, cnep, cepim, ceaf)"],
         ["qualificacoes_administracao"],
     ),
     "L14": (
@@ -179,6 +192,18 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
         "autor.",
         ["cnpj_arquivo", "pncp"],
         ["l15_minimo_cnaes", "l15_minimo_categorias"],
+    ),
+    "L16": (
+        "H57",
+        "Convenente de natureza jurídica sem fins lucrativos com ao menos um sinal: (a) aberta "
+        "menos de N dias antes do início da vigência; (b) registro no CEPIM; (c) dirigente que "
+        "possivelmente coincide com servidor do órgão concedente; (d) dirigente que também é "
+        "sócio de empresa no mesmo endereço, do mesmo CNAE principal ou recém-aberta.",
+        "COAF, Casos e Casos: Tipologias (edição Avaliação Nacional de Riscos 2021), tipologias "
+        "2.1, 2.8 e 2.9; Velasco et al. (2021), seção 5; FATF (2011), § 47. Limiar: decisão do "
+        "autor.",
+        ["cnpj_arquivo", "portal_transparencia (convenios, cepim, servidores)"],
+        ["l16_dias_minimos", "l16_naturezas_sem_fins_lucrativos"],
     ),
 }
 
@@ -212,6 +237,14 @@ _DESCRICAO_PARAMETROS = {
     "2 = 13 a 20, 9 = mais de 80; metadados do CNPJ, nota 4).",
     "l15_minimo_cnaes": "Número mínimo de CNAEs (principal e secundárias).",
     "l15_minimo_categorias": "Número mínimo de categorias de objeto contratadas.",
+    "l6_limites": "Limites de receita bruta por regime, com a fonte: MEI por ano-calendário "
+    "(anual e mensal no ano de início), microempresa e empresa de pequeno porte.",
+    "l6_tolerancia_transicao": "Compara o valor do ano com o maior entre o limite do MEI do ano "
+    "e o do ano seguinte (transição de limite).",
+    "l16_dias_minimos": "Dias mínimos entre o início da atividade e o início da vigência do "
+    "convênio.",
+    "l16_naturezas_sem_fins_lucrativos": "Naturezas jurídicas tratadas como sem fins lucrativos "
+    "(3069 Fundação Privada, 3301 Organização Social, 3999 Associação Privada).",
     "qualificacoes_administracao": "Códigos de qualificação de sócio que contam como "
     "administração (tabela de domínio Qualificações do CNPJ).",
     "t10_expressoes_extras": "Expressões regulares além das do código "

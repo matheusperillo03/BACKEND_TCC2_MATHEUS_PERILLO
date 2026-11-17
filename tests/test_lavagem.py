@@ -456,7 +456,7 @@ def test_rf04_l15_dispara_por_contratos_em_muitas_categorias_de_objeto(cenario):
 def test_rf04_tipologias_l_estao_na_tabela_unica_no_catalogo_e_na_api(cliente, caso_carregado):
     catalogo = cliente.get("/tipologias", headers={"Authorization": "Bearer tok-analista"}).json()
     por_codigo = {t["codigo"]: t for t in catalogo}
-    assert [c for c in por_codigo if c.startswith("L")][:9] == CODIGOS_CADASTRAIS
+    assert [c for c in por_codigo if c in CODIGOS_CADASTRAIS] == CODIGOS_CADASTRAIS
     for codigo in CODIGOS_CADASTRAIS:
         item, politica = por_codigo[codigo], POLITICAS[codigo]
         assert item["grupo"] == politica.grupo == "lavagem"

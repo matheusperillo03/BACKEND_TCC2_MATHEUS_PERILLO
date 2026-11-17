@@ -20,6 +20,7 @@ from buscador.modelos import (
     Alerta,
     AlertaDecisao,
     Anotacao,
+    Aresta,
     Aviso,
     Captura,
     Caso,
@@ -385,9 +386,10 @@ def _expandir_do_caso(ctx: Contexto, caso_id: str, fonte: str, parametros: dict)
     if fonte == "portal_transparencia":
         if parametros.get("recurso") == "servidores":
             raise ErroConector(
-                "'do_caso' vale só para CEIS e CNEP; em 'servidores' informe o código SIAPE e o "
-                "CNPJ do órgão."
+                "'do_caso' não vale para 'servidores': informe o código SIAPE e o CNPJ do órgão."
             )
+        if parametros.get("recurso") in ("cepim", "convenios", "ceaf"):
+            return _expandir_lavagem(ctx, caso_id, parametros["recurso"], contratos, expandido)
         cnpjs = sorted(
             {
                 ni
@@ -424,6 +426,75 @@ def _expandir_do_caso(ctx: Contexto, caso_id: str, fonte: str, parametros: dict)
             "antes dos termos)."
         )
     expandido["contratos"] = itens
+    return expandido
+
+
+def _expandir_lavagem(
+    ctx: Contexto, caso_id: str, recurso: str, contratos: list[Entidade], expandido: dict
+) -> dict:
+    """``do_caso`` das coletas das tipologias L10 e L16: CEPIM e convênios pelas entidades sem
+    fins lucrativos e convenentes do caso; CEAF pelos NOMES dos sócios pessoa física das
+    contratadas e das convenentes (nunca por CPF, RNF04)."""
+    empresas = {
+        e.id: e
+        for e in ctx.sessao.execute(
+            select(Entidade).where(Entidade.caso_id == caso_id, Entidade.tipo == "empresa")
+        ).scalars()
+    }
+    arestas = list(
+        ctx.sessao.execute(
+            select(Aresta).where(
+                Aresta.caso_id == caso_id,
+                Aresta.tipo.in_(("convenente_de", "fornecedor_de", "socio_de")),
+            )
+        ).scalars()
+    )
+    convenentes = {a.origem_id for a in arestas if a.tipo == "convenente_de"}
+    if recurso in ("cepim", "convenios"):
+        naturezas = set(ctx.config.parametros_tipologias()["l16_naturezas_sem_fins_lucrativos"])
+        cnpjs = sorted(
+            {
+                cnpj
+                for e in empresas.values()
+                if e.id in convenentes
+                or str((e.atributos or {}).get("natureza_juridica") or "") in naturezas
+                if (cnpj := normalizar_cnpj(str((e.atributos or {}).get("cnpj") or "")))
+            }
+        )
+        if not cnpjs:
+            raise ErroConector(
+                "O caso não tem entidade sem fins lucrativos (pela natureza jurídica do CNPJ) "
+                "nem convenente com CNPJ para consultar."
+            )
+        if len(cnpjs) > MAX_CODIGOS_DO_CASO:
+            raise ErroConector(
+                f"O caso tem {len(cnpjs)} entidades, acima de {MAX_CODIGOS_DO_CASO} por coleta: "
+                "informe os CNPJs em 'codigoSancionado', em lotes."
+            )
+        expandido["codigoSancionado"] = cnpjs
+        return expandido
+    alvos = convenentes | {a.origem_id for a in arestas if a.tipo == "fornecedor_de"}
+    socios = {a.origem_id for a in arestas if a.tipo == "socio_de" and a.destino_id in alvos}
+    nomes = sorted(
+        {
+            nome
+            for p in ctx.sessao.execute(
+                select(Entidade).where(Entidade.caso_id == caso_id, Entidade.tipo == "pessoa")
+            ).scalars()
+            if p.id in socios and len(nome := str((p.atributos or {}).get("nome") or "")) >= 3
+        }
+    )
+    if not nomes:
+        raise ErroConector(
+            "O caso não tem sócio pessoa física de contratada ou de convenente para consultar "
+            "(colete antes o CNPJ e os contratos ou convênios)."
+        )
+    if len(nomes) > MAX_CODIGOS_DO_CASO:
+        raise ErroConector(
+            f"O caso tem {len(nomes)} sócios, acima de {MAX_CODIGOS_DO_CASO} por coleta: informe "
+            "os nomes em 'nomeSancionado', em lotes."
+        )
+    expandido["nomeSancionado"] = nomes
     return expandido
 
 

@@ -4,8 +4,9 @@ Para que serve. A base completa de dados abertos do CNPJ tem dezenas de gigabyte
 (ver "Fontes reais" no README) e o conector ``cnpj_arquivo`` foi feito para ler um RECORTE: ele
 copia cada arquivo para a custódia e tem teto de bytes e de registros. Este script produz esse
 recorte sem descompactar nada em disco e sem banco: percorre os arquivos ``Empresas*.zip``,
-``Estabelecimentos*.zip`` e ``Socios*.zip`` em blocos, direto do ZIP, e grava só as linhas cujo
-CNPJ básico (8 primeiros dígitos) está na lista. A saída são três arquivos no layout oficial
+``Estabelecimentos*.zip``, ``Socios*.zip`` e ``Simples.zip`` em blocos, direto do ZIP, e grava só
+as linhas cujo CNPJ básico (8 primeiros dígitos) está na lista. A saída são até quatro arquivos
+no layout oficial
 (mesmos bytes das linhas de origem), prontos para a coleta ``cnpj_arquivo``.
 
 Endereço oficial dos ZIPs (conferido em 17/11/2026): o repositório "Arquivos da Receita Federal"
@@ -54,6 +55,8 @@ TABELAS = {
     "empresas": ("Empresas", "EMPRECSV", 7),
     "estabelecimentos": ("Estabelecimentos", "ESTABELE", 30),
     "socios": ("Socios", "SOCIOCSV", 11),
+    # Opção pelo Simples e pelo MEI (tipologia L6). O ZIP é um só (``Simples.zip``).
+    "simples": ("Simples", "SIMPLES", 7),
 }
 MAX_CNPJS = 5_000
 
@@ -219,7 +222,10 @@ def principal(argumentos: list[str] | None = None) -> int:
         return 1
     for tabela, dados in manifesto["tabelas"].items():
         print(f"{tabela}: {dados['linhas']} linha(s) de {dados['zips_lidos']} ZIP(s)")
-    incompletas = [t for t, d in manifesto["tabelas"].items() if d["zips_lidos"] < 10]
+    # A tabela Simples vem num ZIP só; as demais, em dez.
+    incompletas = [
+        t for t, d in manifesto["tabelas"].items() if t != "simples" and d["zips_lidos"] < 10
+    ]
     if incompletas:
         print(
             "AVISO: menos de 10 ZIPs lidos em "

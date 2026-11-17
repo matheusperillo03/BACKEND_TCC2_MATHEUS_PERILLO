@@ -189,6 +189,9 @@ def tipologia_t6(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 
     def regra(caso: tuple[Entidade, Entidade, Entidade]) -> AlertaDetectado | None:
         fornecedor, contrato, sancao = caso
+        # Só os cadastros com período de sanção: o CEPIM (sem período) é tratado na L10 e na L16.
+        if _atr(sancao).get("cadastro") not in ("CEIS", "CNEP"):
+            return None
         assinatura = _data(_atr(contrato).get("data_assinatura"))
         inicio = _data(_atr(sancao).get("data_inicio"))
         fim = _data(_atr(sancao).get("data_fim"))
