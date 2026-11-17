@@ -1,0 +1,8 @@
+# Arquivo opcional: publica o PostgreSQL em 127.0.0.1:55432 (só no host local).
+# Use apenas quando precisar acessar o banco de fora do Compose, e de propósito:
+#   docker compose -f docker-compose.yml -f docker-compose.postgres-porta.yml up -d
+# Sem este arquivo, o banco não tem porta publicada.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:55432:5432"
