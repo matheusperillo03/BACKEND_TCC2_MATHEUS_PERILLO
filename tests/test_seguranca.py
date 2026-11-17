@@ -1522,7 +1522,7 @@ def test_entradas_de_consulta_tem_limites(cliente, caso_id):
     assert cliente.get("/casos/" + "c" * 65, headers=h).status_code == 404
     r = cliente.post(
         f"/casos/{caso_id}/alertas/executar",
-        json={"tipologias": ["T1"] * 11},
+        json={"tipologias": ["T1"] * 31},
         headers=h,
     )
     assert r.status_code == 422
@@ -1541,13 +1541,14 @@ def test_busca_trata_curingas_do_like_como_texto(cliente, caso_carregado):
 
 def test_execucao_parcial_de_tipologias_nao_apaga_as_outras(cliente, caso_carregado):
     h = cabecalhos()
-    assert len(cliente.post(f"/casos/{caso_carregado}/alertas/executar", headers=h).json()) == 7
+    # Sete alertas das T e dois da L5 (sócio estrangeiro nas fixtures).
+    assert len(cliente.post(f"/casos/{caso_carregado}/alertas/executar", headers=h).json()) == 9
     r = cliente.post(
         f"/casos/{caso_carregado}/alertas/executar", json={"tipologias": ["T2"]}, headers=h
     )
     assert [a["tipologia"] for a in r.json()] == ["T2"]
-    assert len(cliente.get(f"/casos/{caso_carregado}/alertas", headers=h).json()) == 7
-    assert _contar_alertas(cliente, caso_carregado) == 7
+    assert len(cliente.get(f"/casos/{caso_carregado}/alertas", headers=h).json()) == 9
+    assert _contar_alertas(cliente, caso_carregado) == 9
 
 
 def _contar_alertas(cliente, caso_id: str) -> int:
@@ -1658,7 +1659,7 @@ def test_postgres_fluxo_completo_com_o_papel_da_aplicacao(postgres, tmp_path, ra
         )
         assert _coletar(cliente, caso_id, "pncp", PERIODO).status_code == 200
         r = cliente.post(f"/casos/{caso_id}/alertas/executar", json={}, headers=cabecalhos())
-        assert r.status_code == 200 and len(r.json()) == 7
+        assert r.status_code == 200 and len(r.json()) == 9
         r = cliente.get(f"/casos/{caso_id}/relatorio", headers=cabecalhos("tok-delegado"))
         assert r.status_code == 200 and r.json()["auditoria"]["integra"] is True
         v = cliente.get("/auditoria/verificar", headers=cabecalhos()).json()

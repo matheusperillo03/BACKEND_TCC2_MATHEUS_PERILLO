@@ -34,7 +34,7 @@ from buscador.tipologias.catalogo import catalogo
 DESCRICAO = (
     "MVP do buscador OSINT (TCC2, UnB/FCTE): coleta passiva de dados abertos (CNPJ, PNCP, Portal "
     "da Transparência, TSE e editais), resolução de entidades, grafo de vínculos, alertas de "
-    "tipologia explicados (T1 a T10), monitoramento contínuo, cadeia de custódia e trilha de "
+    "tipologia explicados (T1 a T10 e L), monitoramento contínuo, cadeia de custódia e trilha de "
     "auditoria encadeada por HMAC. Acesso por usuário real (senha, MFA por TOTP e sessão em "
     "`/auth`) e por caso (membros com papel). As rotas de caso exigem `Authorization: Bearer "
     "<token da sessão>` e `X-Justificativa`."
@@ -179,8 +179,8 @@ def criar_app(
 
     @app.get("/tipologias", response_model=list[esquemas.TipologiaSaida], tags=["base"])
     def tipologias(_usuario: Usuario = Depends(usuario_atual)):
-        """Catálogo das tipologias (T1 a T10): regra, base, política de erro e a configuração em
-        vigor. Não é dado de caso, por isso exige só o token."""
+        """Catálogo das tipologias (T1 a T10 e as de lavagem, L): regra, base, política de erro e
+        a configuração em vigor. Não é dado de caso, por isso exige só o token."""
         return catalogo(config.parametros_tipologias())
 
     app.include_router(rotas_auth.roteador)

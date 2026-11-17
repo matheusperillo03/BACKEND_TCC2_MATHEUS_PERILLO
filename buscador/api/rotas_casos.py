@@ -107,6 +107,8 @@ def _alerta_para_dict(a: Alerta) -> dict:
         "tipologia_nome": politica.nome if politica else a.tipologia,
         "prefere_evitar": politica.prefere_evitar if politica else "",
         "politica_erro": politica.politica_erro if politica else "",
+        "grupo": politica.grupo if politica else "contratacao",
+        "sinal_fraco": politica.sinal_fraco if politica else False,
         "situacao": a.situacao or "pendente",
         # A decisão em vigor é a última do histórico; as anteriores continuam em ``decisoes``.
         "decisao": decisoes[-1] if decisoes else None,

@@ -4,10 +4,11 @@ vigor. A severidade e a política de erro vêm da tabela única ``politicas.POLI
 from __future__ import annotations
 
 from buscador.tipologias import legislacao
-from buscador.tipologias.motor import NOMES_PARAMETROS
+from buscador.tipologias.motor import NOMES_PARAMETROS, chave_do_codigo
 from buscador.tipologias.politicas import POLITICAS
 
 _LEI = f"Lei nº 14.133/2021 ({legislacao.URL_LEI_14133})"
+_GAFI_EGMONT = "FATF; Egmont Group (2018), Concealment of Beneficial Ownership, Anexo E"
 
 # codigo -> (história, regra, base, fontes necessárias, parâmetros usados)
 _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
@@ -91,6 +92,94 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
         ["edital_arquivo"],
         ["t10_expressoes_extras"],
     ),
+    # ---- Tipologias de lavagem e ocultação (L). As histórias H40 a H49 são as propostas em
+    # docs/lavagem/proposta.md (monografia), ainda não aprovadas no backlog.
+    "L1": (
+        "H40",
+        "Endereço normalizado, com complemento, em que N ou mais empresas têm estabelecimento "
+        "ATIVO, mesmo sem contrato público; marca se M ou mais iniciaram a atividade num "
+        "intervalo de D dias.",
+        _GAFI_EGMONT + ", itens 4 e 11; Velasco et al. (2021), seção 3.1. Limiares: decisão do "
+        "autor.",
+        ["cnpj_arquivo"],
+        ["l1_minimo_estabelecimentos", "l1_janela_abertura_dias", "l1_minimo_abertas_na_janela"],
+    ),
+    "L3": (
+        "H41",
+        "Mesma pessoa provável (seis dígitos visíveis do CPF e nome normalizado) com "
+        "qualificação de administração, ou como representante legal, em K ou mais empresas, "
+        "das quais J ou mais abertas em M meses. Pessoa provável, nunca identificação.",
+        _GAFI_EGMONT + ", itens 4 e 10; Carta Circular BCB nº 4.001/2020, III, h; Fronzetti "
+        "Colladon e Remondi (2017); Lei nº 12.846/2013, art. 5º, III. Limiares: decisão do autor.",
+        ["cnpj_arquivo"],
+        [
+            "l3_minimo_empresas",
+            "l3_minimo_abertas_na_janela",
+            "l3_janela_meses",
+            "qualificacoes_administracao",
+        ],
+    ),
+    "L4": (
+        "H42",
+        "Empresa sem pessoa física no primeiro nível do quadro e com N ou mais níveis de sócio "
+        "pessoa jurídica acima dela; informa em que a cadeia termina.",
+        _GAFI_EGMONT + ", item 8; FATF (2011), Laundering the Proceeds of Corruption, § 47; Lei "
+        "nº 12.846/2013, art. 5º, III. Limiar: decisão do autor.",
+        ["cnpj_arquivo"],
+        ["l4_minimo_niveis"],
+    ),
+    "L5": (
+        "H42",
+        "Empresa do caso com sócio estrangeiro (identificador de sócio 3 no CNPJ). Só o nível 1: "
+        "a lista de jurisdições (nível 2) não foi implementada.",
+        _GAFI_EGMONT + ", item 4.",
+        ["cnpj_arquivo"],
+        [],
+    ),
+    "L7": (
+        "H44",
+        "Contratada em que nenhum sócio atual entrou até X dias depois do início da atividade e "
+        "a entrada mais recente é anterior em até Y meses a um contrato (retrato único do "
+        "quadro).",
+        _GAFI_EGMONT + ", item 7. Limiares: decisão do autor.",
+        ["cnpj_arquivo", "pncp"],
+        ["l7_dias_apos_abertura", "l7_meses_antes_contrato"],
+    ),
+    "L8": (
+        "H45",
+        "Contratada que dispara a T1 (aberta pouco antes do contrato) E a T7 (sócio que "
+        "possivelmente coincide com servidor do órgão contratante). Composição, sem coleta nova.",
+        "COAF, Casos e Casos: Tipologias (edição Avaliação Nacional de Riscos 2021), tipologia "
+        "2.7. O trecho 'sem empregados' não é verificável com dado aberto.",
+        ["cnpj_arquivo", "pncp", "portal_transparencia (servidores)"],
+        ["t1_dias_minimos"],
+    ),
+    "L10": (
+        "H47",
+        "Contratada sem sanção própria vigente que divide sócio-administrador provável ou "
+        "endereço normalizado com empresa de sanção vigente na data do contrato.",
+        _GAFI_EGMONT + ", item 3; Velasco et al. (2021), seção 3; Lei nº 12.846/2013, art. 5º, "
+        "IV, e.",
+        ["cnpj_arquivo", "pncp", "portal_transparencia (ceis, cnep)"],
+        ["qualificacoes_administracao"],
+    ),
+    "L14": (
+        "H49",
+        "Sinal fraco: contratada cujos sócios-administradores estão TODOS em faixa etária "
+        "atípica, com valor contratado acima de V. Só a faixa etária é usada.",
+        _GAFI_EGMONT + ", itens 3 e 10. Limiares: decisão do autor.",
+        ["cnpj_arquivo", "pncp"],
+        ["l14_valor_minimo", "l14_faixas_atipicas", "qualificacoes_administracao"],
+    ),
+    "L15": (
+        "H49",
+        "Sinal fraco: contratada com N ou mais CNAEs (principal e secundárias) ou com contratos "
+        "em M ou mais categorias de objeto.",
+        "Velasco et al. (2021), seção 3.2; " + _GAFI_EGMONT + ", item 4. Limiares: decisão do "
+        "autor.",
+        ["cnpj_arquivo", "pncp"],
+        ["l15_minimo_cnaes", "l15_minimo_categorias"],
+    ),
 }
 
 _DESCRICAO_PARAMETROS = {
@@ -106,15 +195,35 @@ _DESCRICAO_PARAMETROS = {
     "t8_percentual_limite_reforma": "Limite de acréscimo em % para reforma de edifício ou de "
     "equipamento (art. 125).",
     "t9_situacoes_eleito": "Situações de totalização do TSE que contam como eleito.",
+    "l1_minimo_estabelecimentos": "Número mínimo de empresas com estabelecimento ativo no mesmo "
+    "endereço (com complemento).",
+    "l1_janela_abertura_dias": "Intervalo, em dias, para medir a concentração das aberturas.",
+    "l1_minimo_abertas_na_janela": "Aberturas no intervalo para marcar abertura concentrada.",
+    "l3_minimo_empresas": "Número mínimo de empresas administradas pela mesma pessoa provável.",
+    "l3_minimo_abertas_na_janela": "Quantas dessas empresas precisam ter sido abertas no "
+    "intervalo.",
+    "l3_janela_meses": "Intervalo, em meses, entre as aberturas.",
+    "l4_minimo_niveis": "Número mínimo de níveis de sócio pessoa jurídica.",
+    "l7_dias_apos_abertura": "Dias depois do início da atividade em que a entrada ainda conta "
+    "como de fundador.",
+    "l7_meses_antes_contrato": "Meses entre a entrada mais recente no quadro e o contrato.",
+    "l14_valor_minimo": "Valor contratado mínimo, em reais, somado por empresa.",
+    "l14_faixas_atipicas": "Códigos de faixa etária tratados como atípicos (1 = até 12 anos, "
+    "2 = 13 a 20, 9 = mais de 80; metadados do CNPJ, nota 4).",
+    "l15_minimo_cnaes": "Número mínimo de CNAEs (principal e secundárias).",
+    "l15_minimo_categorias": "Número mínimo de categorias de objeto contratadas.",
+    "qualificacoes_administracao": "Códigos de qualificação de sócio que contam como "
+    "administração (tabela de domínio Qualificações do CNPJ).",
     "t10_expressoes_extras": "Expressões regulares além das do código "
     f"({'; '.join(r.expressao for r in legislacao.REGRAS_CLAUSULAS)}).",
 }
 
 
 def catalogo(parametros: dict) -> list[dict]:
-    """Uma entrada por tipologia, em ordem numérica, com os valores de ``parametros`` em vigor."""
+    """Uma entrada por tipologia (T1 a T10 e depois as L), com os valores de ``parametros`` em
+    vigor."""
     itens = []
-    for codigo in sorted(_DESCRICOES, key=lambda c: int(c[1:])):
+    for codigo in sorted(_DESCRICOES, key=chave_do_codigo):
         historia, regra, base, fontes, nomes = _DESCRICOES[codigo]
         politica = POLITICAS[codigo]
         itens.append(
@@ -125,6 +234,8 @@ def catalogo(parametros: dict) -> list[dict]:
                 "severidade": politica.severidade,
                 "prefere_evitar": politica.prefere_evitar,
                 "politica_erro": politica.politica_erro,
+                "grupo": politica.grupo,
+                "sinal_fraco": politica.sinal_fraco,
                 "regra": regra,
                 "base": base,
                 "fontes": fontes,
