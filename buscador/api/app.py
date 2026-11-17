@@ -21,6 +21,7 @@ from buscador.api import (
     rotas_equipe,
     rotas_exportacao,
     rotas_ia,
+    rotas_importacao_judicial,
     rotas_monitoramento,
 )
 from buscador.api.deps import usuario_atual
@@ -153,6 +154,20 @@ def criar_app(
     app.state.provedor_ia = provedor_ia if provedor_ia is not None else criar_provedor(config)
     app.state.chave_auditoria = chave
     app.state.ancora = auditoria.Ancora(config.dados_dir, chave)
+    # Importação sob ordem judicial (RF10): ``None`` com o módulo desligado (o padrão). Ligado,
+    # tem base e chave de cifra próprias, separadas das do dado aberto.
+    app.state.importacao_judicial = None
+    if config.importacao_judicial_ativa:
+        from buscador.importacao_judicial import Modulo
+
+        app.state.importacao_judicial = Modulo(
+            config.url_importacao_judicial(),
+            config.chave_importacao_judicial(),
+            config.dados_dir,
+            config.importacao_judicial_dir_base,
+            config.importacao_judicial_max_bytes_arquivo,
+            config.importacao_judicial_max_linhas,
+        )
     # Extras injetados nos conectores (ex.: transporte httpx simulado nos testes e na demo).
     app.state.extras_conectores = extras_conectores or {}
 
@@ -190,6 +205,8 @@ def criar_app(
     app.include_router(rotas_exportacao.roteador)
     app.include_router(rotas_ia.roteador)
     app.include_router(rotas_monitoramento.roteador)
+    app.include_router(rotas_importacao_judicial.roteador_estado)
+    app.include_router(rotas_importacao_judicial.roteador)
     app.include_router(rotas_capturas.roteador)
     app.include_router(rotas_auditoria.roteador)
     return app

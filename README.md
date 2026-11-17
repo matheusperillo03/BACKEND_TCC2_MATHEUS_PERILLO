@@ -80,7 +80,7 @@ Todas estão em `.env.example`.
 
 ## Uso da API
 
-Todas as rotas, menos `/health`, `/me`, `/tipologias`, `/ia` e `/auth/*`, exigem `Authorization: Bearer <token>` **e** `X-Justificativa: <texto>`. O token é o da sessão, obtido em `POST /auth/login` e `POST /auth/mfa` (ou, só com `MODO_DEV=1`, um token fixo de `TOKENS_DEV`). As rotas de caso exigem ainda que o usuário seja membro do caso (`403` se não for). Sem justificativa a resposta é `400`; sem token ou com token inválido, `401`. Cabeçalhos HTTP só carregam ASCII com segurança: o front-end deve enviar a justificativa com `encodeURIComponent(texto)` (o servidor sempre decodifica as sequências `%XX`; texto cru em UTF-8 também é aceito).
+Todas as rotas, menos `/health`, `/me`, `/tipologias`, `/ia`, `/importacao-judicial/estado` e `/auth/*`, exigem `Authorization: Bearer <token>` **e** `X-Justificativa: <texto>`. O token é o da sessão, obtido em `POST /auth/login` e `POST /auth/mfa` (ou, só com `MODO_DEV=1`, um token fixo de `TOKENS_DEV`). As rotas de caso exigem ainda que o usuário seja membro do caso (`403` se não for). Sem justificativa a resposta é `400`; sem token ou com token inválido, `401`. Cabeçalhos HTTP só carregam ASCII com segurança: o front-end deve enviar a justificativa com `encodeURIComponent(texto)` (o servidor sempre decodifica as sequências `%XX`; texto cru em UTF-8 também é aceito).
 
 Limites de entrada: a justificativa tem até 500 caracteres, precisa conter letras ou números e não aceita quebra de linha, caractere de controle nem caractere invisível (`400`). Título, número do procedimento, termos de busca e parâmetros também recusam caracteres de controle. O corpo tem até `MAX_CORPO_BYTES` (`413`). `NaN` e `Infinity` são recusados em qualquer número (`422`). As respostas `422` de validação não devolvem o valor recusado.
 
@@ -523,6 +523,41 @@ Uma empresa ou pessoa com alertas de várias tipologias distintas recebe um aler
 - **L7, parte (b)** (troca de sócios entre duas coletas): o monitoramento já avisa a mudança de quadro, mas não gera alerta de tipologia.
 - **L9, L11 (RF05), L12 e L13:** dependem de decisão do orientador.
 
+## Importação sob ordem judicial (RF10)
+
+Módulo **separado e desligado por padrão** (`IMPORTACAO_JUDICIAL_ATIVA=0`), para dados bancários recebidos com o sigilo afastado (LC 105/2001). **Só dados sintéticos neste protótipo:** a pasta importada precisa ter o arquivo-marcador `SINTETICO`; sem ele a importação é recusada. Dado real nunca foi usado. Código em `buscador/importacao_judicial/` e `buscador/api/rotas_importacao_judicial.py`; desenho em `docs/lavagem/proposta.md`, seção 3 (monografia), a validar com o orientador.
+
+- **Leiaute:** Instrução Normativa BCB nº 636/2025, Anexo I, itens I a V (AGÊNCIAS, CONTAS, TITULARES, EXTRATO e ORIGEM-DESTINO), transcrito campo a campo (nome, tipo e tamanho) do texto oficial lido em 17/11/2026 na API de normativos do Banco Central. Regras do art. 3º: `.txt`, ASCII, sem cabeçalho, TAB entre colunas, data `ddmmaaaa`, hora `hhmmss`, valor em centavos sem separador. A norma vigora a partir de 1º/12/2026.
+- **Decisão judicial antes de tudo:** `POST /casos/{id}/importacao-judicial/decisoes` registra número do processo, número da decisão, juízo, data, período autorizado, contas autorizadas (banco, agência e conta), investigados (opcional) e a descrição do escopo. Só os perfis de `IMPORTACAO_JUDICIAL_PERFIS` (padrão `delegado`) registram, e precisam ser membros do caso. A importação só existe sob uma decisão (`.../decisoes/{decisao_id}/importacoes`).
+- **Validação:** a linha fora do leiaute (número de campos, tipo, tamanho, data, domínio, obrigatório vazio, caractere não ASCII) é **rejeitada**, e o relatório traz linha, campo e motivo, nunca o conteúdo. Arquivos das corretoras (itens VI a XI) não são aceitos.
+- **Escopo:** a linha válida que está fora do que a decisão autorizou fica em **quarentena**, sinalizada com o motivo: conta não autorizada, lançamento fora do período, origem-destino de lançamento em quarentena ou não encontrado, agência sem conta autorizada. A conta de contraparte que o próprio leiaute prevê (`MOVIMENTACAO_CONTA = 3`) não vai para a quarentena.
+- **Segregação:** base própria (`IMPORTACAO_JUDICIAL_DATABASE_URL`; vazio = SQLite em `<DADOS_DIR>/sigiloso/`), com metadados próprios (tabelas `ij_*`, que não existem na base do dado aberto); chave de cifra própria (`IMPORTACAO_JUDICIAL_CHAVE`, AES-256-GCM, recusada se for igual à da custódia ou à da auditoria); escopo da decisão, campos de cada registro, relatório de rejeições e bytes do arquivo recebido ficam cifrados. Todo registro leva a marca `sigiloso: ordem judicial nº ... (processo ...)`. Nada vira entidade, vínculo, alerta, captura, relatório ou exportação.
+- **Custódia:** SHA-256, tamanho, origem (`simba`, `oficio` ou `midia`), usuário e carimbo de tempo de cada arquivo recebido.
+- **Auditoria (RNF02):** toda chamada, inclusive de leitura, grava uma entrada `importacao_judicial.*` na trilha encadeada, com a justificativa, os filtros e as contagens, e sem conta, documento ou conteúdo. A entrada é confirmada antes do dado: sem auditoria, nada é gravado nem devolvido.
+- **Dados pessoais:** a leitura devolve o CPF sempre descaracterizado (titular, origem-destino, chave Pix e texto livre).
+
+| Método e rota | Descrição |
+|---|---|
+| `GET /importacao-judicial/estado` | Só com o token: `{"ativa","perfis_autorizados","leiaute","arquivos","origens","somente_sintetico"}`. Com o módulo desligado, as rotas abaixo respondem `404` |
+| `POST /casos/{id}/importacao-judicial/decisoes` | Registra a decisão (`201`). Perfil não autorizado: `403`, com auditoria |
+| `GET /casos/{id}/importacao-judicial/decisoes` | Decisões do caso, com a `marca` e o número de importações |
+| `POST /casos/{id}/importacao-judicial/decisoes/{decisao_id}/importacoes` | Corpo `{"diretorio","origem","descricao_origem"?}`; `diretorio` é relativo a `IMPORTACAO_JUDICIAL_DIR_BASE`. Devolve o relatório por arquivo (`linhas`, `aceitas`, `rejeitadas`, `em_quarentena`, `rejeicoes`, `sha256`) e os totais. `aceitas` inclui as que foram para a quarentena; `linhas = aceitas + rejeitadas` |
+| `GET /casos/{id}/importacao-judicial/importacoes` | Importações do caso |
+| `GET /casos/{id}/importacao-judicial/registros` | Filtros `decisao_id`, `tipo`, `quarentena`, `limite` (até 200) e `deslocamento`. Datas em ISO e valores em reais |
+
+Todas as rotas de caso exigem `X-Justificativa`, papel de investigador no caso e caso dentro do prazo de retenção.
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `IMPORTACAO_JUDICIAL_ATIVA` | `0` | Liga o módulo |
+| `IMPORTACAO_JUDICIAL_CHAVE` | vazio | 32 bytes em hexadecimal (`openssl rand -hex 32`); obrigatória com o módulo ligado |
+| `IMPORTACAO_JUDICIAL_DATABASE_URL` | vazio | Base do dado sigiloso; não pode ser a `DATABASE_URL` |
+| `IMPORTACAO_JUDICIAL_DIR_BASE` | vazio | Raiz de onde os arquivos são lidos |
+| `IMPORTACAO_JUDICIAL_PERFIS` | `delegado` | Perfis que registram a decisão |
+| `IMPORTACAO_JUDICIAL_MAX_BYTES_ARQUIVO`, `IMPORTACAO_JUDICIAL_MAX_LINHAS` | `16777216`, `200000` | Limites por arquivo e por importação |
+
+**Fora do protótipo:** a camada do grafo e os alertas financeiros sobre o dado sigiloso; o RIF do COAF (não há leiaute público); o leiaute anterior (Carta-Circular BCB 3.454/2010); o descarte ao fim da retenção; a troca da chave do módulo; a exibição do CPF completo. Não foi conferido que o SIMBA entrega exatamente neste leiaute, e o Anexo II (códigos de tipo de lançamento) não foi transcrito. A exigência de ASCII segue a letra da norma: nome com acento é rejeitado.
+
 ## Fontes reais e piloto com dados públicos
 
 Em 17/11/2026 os conectores foram conferidos contra as **fontes reais**, para preparar um piloto em que um delegado simula uma investigação com dados públicos (não é investigação sigilosa). Só houve coleta passiva (`GET`, `HEAD` e a listagem do compartilhamento público da Receita), com no máximo uma requisição por segundo em cada fonte e sem baixar nenhuma base completa. Os testes automatizados continuam **só com dados sintéticos**; os arquivos reais ficam em `dados-reais/`, que está no `.gitignore` e no `.dockerignore`.
@@ -667,7 +702,8 @@ buscador/
   auditoria/       trilha somente de acréscimo, encadeada por HMAC, com âncora externa; verificação da cadeia
   resolucao/       normalização (nome, CPF descaracterizado, endereço, DV do CNPJ) e Resolvedor
   grafo/           sql.py: vizinhança e caminho consultados no banco (usado pela API); servico.py: a versão original com NetworkX, mantida para a comparação
-  tipologias/      T1 a T4 (motor.py) e T5 a T10 (horizonte2.py), com motivo em português e evidências; severidade e política de erro numa tabela única (politicas.py); parâmetros legais e listas de termos com a fonte (legislacao.py); catálogo para a interface (catalogo.py)
+  importacao_judicial/  RF10: leiaute da IN BCB 636/2025, base e chave próprias do dado sob ordem judicial (desligado por padrão)
+  tipologias/      T1 a T4 (motor.py), T5 a T10 (horizonte2.py), L de lavagem (lavagem.py) e combinação (combinacao.py), com motivo em português e evidências; severidade e política de erro numa tabela única (politicas.py); parâmetros legais e listas de termos com a fonte (legislacao.py); catálogo para a interface (catalogo.py)
   relatorio/       relatório JSON e Markdown
   coleta.py        conector → custódia → resolução
   api/             FastAPI: deps (sessão ou token de desenvolvimento, justificativa, acesso por caso, auditoria), esquemas, rotas (casos, equipe, exportação, IA, autenticação) e a execução do monitoramento (monitoramento.py)
