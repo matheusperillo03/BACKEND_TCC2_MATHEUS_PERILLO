@@ -1,0 +1,183 @@
+"""Tabela única de severidade e de política de erro das tipologias (RF14, H13).
+
+DECISÃO DO AUTOR, a validar com o orientador: os valores abaixo não vêm de norma nem da
+literatura. São a proposta do autor para ordenar a fila de alertas do protótipo, e este arquivo é
+o único lugar em que eles são definidos (o motor, a API, o relatório e os testes leem daqui).
+
+- ``severidade`` (alta, média ou baixa) ordena a lista de alertas. Ela é da tipologia, não do
+  alerta: dois alertas da mesma tipologia têm a mesma severidade, e os valores observados (dias,
+  razão, quantidade de empresas) continuam em ``parametros`` de cada alerta.
+- ``politica_erro`` diz qual erro a regra prefere evitar: falso negativo (deixar passar um caso
+  que merecia análise) ou falso positivo (apontar um caso regular), e por quê. Ela é mostrada ao
+  investigador junto de cada alerta, para que ele saiba o que esperar da regra.
+
+Todo alerta é pista, nunca conclusão: a confirmação ou o descarte é do investigador (RF12).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+SEVERIDADES = ("alta", "media", "baixa")
+# Posição na ordenação da lista de alertas: alta primeiro.
+ORDEM_SEVERIDADE = {nome: posicao for posicao, nome in enumerate(SEVERIDADES)}
+ROTULOS_SEVERIDADE = {"alta": "alta", "media": "média", "baixa": "baixa"}
+
+# Erro que a regra prefere evitar.
+EVITA_FALSO_NEGATIVO = "falso_negativo"
+EVITA_FALSO_POSITIVO = "falso_positivo"
+
+
+@dataclass(frozen=True)
+class Politica:
+    nome: str
+    severidade: str
+    prefere_evitar: str
+    politica_erro: str
+
+    def __post_init__(self) -> None:
+        if self.severidade not in SEVERIDADES:
+            raise ValueError(f"severidade desconhecida: {self.severidade}")
+        if self.prefere_evitar not in (EVITA_FALSO_NEGATIVO, EVITA_FALSO_POSITIVO):
+            raise ValueError(f"política de erro desconhecida: {self.prefere_evitar}")
+
+
+POLITICAS: dict[str, Politica] = {
+    # T4 (H31): fato objetivo do cadastro oficial e de conferência barata, por isso vem primeiro.
+    "T4": Politica(
+        nome="Empresa contratada sem situação cadastral ativa no CNPJ",
+        severidade="alta",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        politica_erro=(
+            "Prefere evitar falso negativo: dispara para qualquer situação diferente de ATIVA "
+            "(nula, suspensa, inapta ou baixada), mesmo quando a mudança de situação é posterior "
+            "à assinatura do contrato. O falso positivo esperado vem da defasagem do arquivo do "
+            "CNPJ e custa pouco: basta conferir a situação e a data no cadastro."
+        ),
+    ),
+    # T1: empresa nova contratada é comum e lícita; o limiar largo aceita ruído para não perder
+    # a empresa aberta para o contrato.
+    "T1": Politica(
+        nome="Empresa aberta pouco antes do contrato",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        politica_erro=(
+            "Prefere evitar falso negativo: o limiar de dias é largo e aponta toda empresa "
+            "recente, inclusive as regulares. Espera-se falso positivo (empresa nova que "
+            "venceu de forma legítima); cabe ao investigador descartar com justificativa."
+        ),
+    ),
+    # T3: só a desproporção grosseira dispara; desproporções menores ficam de fora de propósito.
+    "T3": Politica(
+        nome="Capital social incompatível com o valor contratado",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        politica_erro=(
+            "Prefere evitar falso positivo: só dispara quando o contrato vale muitas vezes o "
+            "capital social (limiar configurável), porque capital baixo é comum em empresas "
+            "regulares. Aceita falso negativo: desproporções menores não são apontadas."
+        ),
+    ),
+    # T2: endereço compartilhado tem muitas explicações lícitas (escritório de contabilidade,
+    # coworking, mesmo prédio), por isso fica no fim da fila.
+    "T2": Politica(
+        nome="Endereço compartilhado por empresas contratadas",
+        severidade="baixa",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        politica_erro=(
+            "Prefere evitar falso negativo: aponta todo endereço com várias empresas em que ao "
+            "menos uma é contratada. O falso positivo é frequente (escritório de contabilidade, "
+            "coworking, endereço fiscal comum), por isso a severidade é baixa e o alerta serve "
+            "para orientar a análise de vínculos, não para concluir."
+        ),
+    ),
+    # ---- Horizonte 2 (T5 a T10): também DECISÃO DO AUTOR, a validar com o orientador ----------
+    # T6 (H33): registro oficial de sanção com datas; conferência barata, por isso severidade alta.
+    "T6": Politica(
+        nome="Empresa contratada com sanção vigente (CEIS ou CNEP)",
+        severidade="alta",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        politica_erro=(
+            "Prefere evitar falso negativo: dispara para qualquer registro do CEIS ou do CNEP "
+            "cujo período cobre a data de assinatura, sem avaliar o alcance da sanção (órgão, "
+            "esfera ou tipo). O falso positivo esperado é a sanção que não impede contratar com "
+            "aquele órgão; confere-se no próprio registro."
+        ),
+    ),
+    # T7 (H34): conflito de interesse é grave, mas a identidade não é confirmável com dados abertos.
+    "T7": Politica(
+        nome="Possível coincidência entre sócio da contratada e servidor do órgão contratante",
+        severidade="alta",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        politica_erro=(
+            "Prefere evitar falso positivo: só dispara quando coincidem os seis dígitos visíveis "
+            "do CPF descaracterizado E o nome normalizado; só o nome nunca dispara (vira apenas "
+            "sugestão de resolução). Ainda assim é possível coincidência, não identificação: "
+            "homônimo com os mesmos seis dígitos é possível. Aceita falso negativo: grafia "
+            "diferente do nome ou CPF ausente na fonte não são apontados."
+        ),
+    ),
+    # T8 (H35): limite legal objetivo, mas o campo do PNCP não distingue acréscimo de supressão.
+    "T8": Politica(
+        nome="Aditivos acima do limite do art. 125 da Lei nº 14.133/2021",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        politica_erro=(
+            "Prefere evitar falso negativo: soma todo valor acrescido positivo dos termos e "
+            "compara com o valor inicial sem atualização monetária. Espera-se falso positivo "
+            "quando o termo é supressão (o PNCP usa o mesmo campo), quando o valor inicial foi "
+            "atualizado ou quando a reforma de edifício ou de equipamento não aparece no objeto."
+        ),
+    ),
+    # T5 (H32): o critério de "mesma natureza" é uma aproximação; o padrão é o mais restrito.
+    "T5": Politica(
+        nome="Possível fracionamento de despesa (art. 75, § 1º, da Lei nº 14.133/2021)",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        politica_erro=(
+            "Prefere evitar falso positivo: por padrão só soma contratações do mesmo fornecedor "
+            "e da mesma categoria, na mesma unidade e no mesmo exercício, cada uma abaixo do "
+            "limite de dispensa. Aceita falso negativo: o fracionamento entre fornecedores "
+            "diferentes só aparece com o critério 'categoria'. O alerta é indício: o contrato no "
+            "PNCP não diz se houve dispensa."
+        ),
+    ),
+    # T9 (H39): doação registrada é lícita; o vínculo com o ente é territorial.
+    "T9": Politica(
+        nome="Doador de campanha contratado pelo ente do candidato eleito",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        politica_erro=(
+            "Prefere evitar falso positivo: exige candidato eleito, órgão do mesmo ente e "
+            "contrato assinado depois da doação; para doador pessoa física, exige ainda os seis "
+            "dígitos visíveis do CPF e o nome iguais aos de um sócio (possível coincidência, "
+            "nunca identificação). Aceita falso negativo: doações de 'recursos próprios' e "
+            "doadores sem vínculo societário coletado ficam de fora."
+        ),
+    ),
+    # T10 (H36): busca textual; muitos contextos lícitos para a mesma expressão.
+    "T10": Politica(
+        nome="Cláusula potencialmente restritiva em edital",
+        severidade="baixa",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        politica_erro=(
+            "Prefere evitar falso negativo: aponta toda ocorrência textual das expressões "
+            "configuradas, mesmo fora do capítulo de habilitação. O falso positivo é frequente "
+            "(a expressão citada em outro contexto), por isso a severidade é baixa; cada alerta "
+            "traz o trecho literal e a posição para conferência imediata."
+        ),
+    ),
+}
+
+
+def politica(tipologia: str) -> Politica | None:
+    return POLITICAS.get(tipologia)
+
+
+def severidade(tipologia: str) -> str:
+    return POLITICAS[tipologia].severidade
+
+
+def chave_ordenacao(severidade_: str, tipologia: str, titulo: str) -> tuple[int, str, str]:
+    """Ordem da lista de alertas: severidade (alta primeiro), tipologia e título."""
+    return (ORDEM_SEVERIDADE.get(severidade_, len(SEVERIDADES)), tipologia, titulo)
