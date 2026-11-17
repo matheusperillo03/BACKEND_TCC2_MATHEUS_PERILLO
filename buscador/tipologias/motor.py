@@ -1,4 +1,5 @@
-"""Motor das tipologias (T1 a T4 aqui; T5 a T10 em ``horizonte2``, registradas pelo pacote).
+"""Motor das tipologias (T1 a T4 aqui; T5 a T10 em ``horizonte2`` e as de lavagem, L, em
+``lavagem``, registradas pelo pacote).
 
 Cada tipologia é uma função pura sobre um ``Contexto`` (entidades, arestas e capturas do caso já
 carregadas) e devolve ``AlertaDetectado`` com:
@@ -45,8 +46,24 @@ NOMES_PARAMETROS = (
     "t5_minimo_contratacoes",
     "t8_percentual_limite",
     "t8_percentual_limite_reforma",
+    # Tipologias de lavagem (L): limiares numéricos, todos decisão do autor.
+    "l1_minimo_estabelecimentos",
+    "l1_janela_abertura_dias",
+    "l1_minimo_abertas_na_janela",
+    "l3_minimo_empresas",
+    "l3_minimo_abertas_na_janela",
+    "l3_janela_meses",
+    "l4_minimo_niveis",
+    "l7_dias_apos_abertura",
+    "l7_meses_antes_contrato",
+    "l14_valor_minimo",
+    "l15_minimo_cnaes",
+    "l15_minimo_categorias",
 )
+# Decimais que precisam ser maiores que zero.
 _PARAMETROS_DECIMAIS = ("t3_razao_minima", "t8_percentual_limite", "t8_percentual_limite_reforma")
+# Decimais que aceitam zero.
+_PARAMETROS_DECIMAIS_COM_ZERO = ("l14_valor_minimo",)
 
 
 @dataclass(frozen=True)
@@ -543,9 +560,28 @@ def parametros_padrao_h2() -> dict:
     }
 
 
+_ORDEM_PREFIXO = {"T": 0, "L": 1}
+
+
+def chave_do_codigo(codigo: str) -> tuple[int, int, str]:
+    """Ordem do catálogo e da execução: T1 a T10, depois as L em ordem numérica, depois o resto
+    (o alerta de combinação, que depende dos demais)."""
+    prefixo, numero = codigo[:1], codigo[1:]
+    if prefixo in _ORDEM_PREFIXO and numero.isdigit():
+        return (_ORDEM_PREFIXO[prefixo], int(numero), codigo)
+    return (len(_ORDEM_PREFIXO), 0, codigo)
+
+
+def parametros_padrao_lavagem() -> dict:
+    """Padrões do código para as tipologias L (os mesmos padrões da configuração)."""
+    from buscador.tipologias import lavagem
+
+    return lavagem.parametros_padrao()
+
+
 def ordem_tipologias() -> list[str]:
-    """Códigos das tipologias em ordem numérica (T1, T2, ..., T10)."""
-    return sorted(TIPOLOGIAS, key=lambda nome: int(nome[1:]))
+    """Códigos das tipologias na ordem de execução (T1 a T10, L1 a L16)."""
+    return sorted(TIPOLOGIAS, key=chave_do_codigo)
 
 
 # ---- Execução ---------------------------------------------------------------------------------
@@ -558,6 +594,18 @@ _LIMITES_PARAMETROS = {
     "t5_minimo_contratacoes": (2, 1_000),
     "t8_percentual_limite": (0.0, 1_000.0),
     "t8_percentual_limite_reforma": (0.0, 1_000.0),
+    "l1_minimo_estabelecimentos": (2, 10_000),
+    "l1_janela_abertura_dias": (1, 36_500),
+    "l1_minimo_abertas_na_janela": (2, 10_000),
+    "l3_minimo_empresas": (2, 10_000),
+    "l3_minimo_abertas_na_janela": (1, 10_000),
+    "l3_janela_meses": (1, 1_200),
+    "l4_minimo_niveis": (2, 20),
+    "l7_dias_apos_abertura": (0, 36_500),
+    "l7_meses_antes_contrato": (1, 1_200),
+    "l14_valor_minimo": (0.0, 1e12),
+    "l15_minimo_cnaes": (2, 1_000),
+    "l15_minimo_categorias": (2, 100),
 }
 
 
@@ -580,6 +628,8 @@ def parametros_efetivos(padrao: dict, sobrescrita: dict | None) -> dict:
         if nome in _PARAMETROS_DECIMAIS:
             if numero <= 0:
                 raise ValueError(f"Parâmetro '{nome}' deve ser maior que zero.")
+            parametros[nome] = numero
+        elif nome in _PARAMETROS_DECIMAIS_COM_ZERO:
             parametros[nome] = numero
         else:
             parametros[nome] = int(numero)
@@ -648,7 +698,7 @@ def executar(
     # ``limiares`` (gravado em cada alerta) guarda só os limiares numéricos recebidos; a
     # configuração estruturada usada por uma tipologia vai nos ``parametros`` do próprio alerta.
     limiares = {k: v for k, v in parametros.items() if k in NOMES_PARAMETROS}
-    parametros = {**parametros_padrao_h2(), **parametros}
+    parametros = {**parametros_padrao_h2(), **parametros_padrao_lavagem(), **parametros}
     # Serializa execuções concorrentes do mesmo caso (no SQLite a cláusula é ignorada).
     sessao.execute(select(Caso.id).where(Caso.id == caso_id).with_for_update())
     ctx = carregar_contexto(sessao, caso_id, ler_captura, limites_pdf)

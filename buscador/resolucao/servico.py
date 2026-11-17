@@ -365,8 +365,18 @@ class Resolvedor:
             "data_situacao_cadastral": data_layout_para_iso(r.data_situacao_cadastral),
             "data_inicio_atividade": data_layout_para_iso(r.data_inicio_atividade),
             "cnae_fiscal_principal": r.cnae_fiscal_principal,
+            # Lista separada por vírgula no layout (metadados do CNPJ, nota 5): usada pela L15.
+            "cnaes_secundarios": sorted(
+                {c.strip() for c in r.cnae_fiscal_secundaria.split(",") if c.strip()}
+            ),
             "endereco": legivel,
             "endereco_normalizado": chave_endereco,
+            # A T2 ignora o complemento (mesmo prédio); a L1 separa as salas (decisão do autor).
+            "endereco_com_complemento": (
+                f"{chave_endereco}|{normalizar_nome(r.complemento)}" if chave_endereco else ""
+            ),
+            "pais": r.pais,
+            "nome_cidade_exterior": r.nome_cidade_exterior,
             "uf": r.uf,
             "municipio": r.municipio,
             "captura_id": r.captura_id,
@@ -543,6 +553,11 @@ class Resolvedor:
                 "identificador_socio": r.identificador_socio,
                 "representante_legal": mascarar_cpf(r.representante_legal),
                 "nome_representante": r.nome_representante,
+                "qualificacao_representante": r.qualificacao_representante,
+                # Código do país do sócio estrangeiro (tabela de domínio Países) e faixa etária
+                # (código de 0 a 9; nunca a idade): usados pelas tipologias L5 e L14.
+                "pais": r.pais,
+                "faixa_etaria": r.faixa_etaria,
             },
         )
 

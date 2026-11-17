@@ -449,6 +449,37 @@ Gatilhos novos (SQLite e PostgreSQL): `anotacoes_sem_update`, `anotacoes_sem_del
 - **H22:** testado com um servidor Ollama real (`qwen2.5:7b`, 16/11/2026), mas não com editais reais (em 17/11/2026 um edital real em PDF passou só pela extração de texto, sem a IA); sem medição de qualidade (precisão e revocação); PDF só com camada de texto (sem OCR); decisão única por sugestão; sem serviço `ollama` no Compose (o operador o acrescenta e declara o nome em `IA_HOSTS_LOCAIS`).
 
 
+## Lavagem de dinheiro e ocultação (tipologias L)
+
+As tipologias T1 a T10 sinalizam possíveis infrações antecedentes em contratações. As tipologias **L** sinalizam possível ocultação pela interposição de pessoas e empresas (Lei nº 9.613/1998, art. 1º). Todas são **indício cadastral**: nenhuma prova lavagem, e todo alerta continua sendo pista (RF12). Os sinais financeiros (depósitos, "correntes", beneficiário final de operação) não são verificáveis com dado aberto. As fichas, com o critério e a fonte de cada uma, estão em `docs/lavagem/tipologias-lavagem.md` e `docs/lavagem/fontes.md` (monografia); no código, em `buscador/tipologias/lavagem.py`. **Os limiares são decisão do autor, a validar com o orientador.**
+
+### Tipologias sobre dados já coletados
+
+| Tipologia | Regra | Base | Severidade e erro que prefere evitar |
+|---|---|---|---|
+| **L1** Endereço de registro em massa | Endereço normalizado **com o complemento** em que `L1_MINIMO_ESTABELECIMENTOS` (5) ou mais empresas têm estabelecimento ATIVO, mesmo sem contrato. Marca `abertura_concentrada` quando `L1_MINIMO_ABERTAS_NA_JANELA` (3) ou mais iniciaram a atividade em `L1_JANELA_ABERTURA_DIAS` (180). Extensão da T2 | FATF/Egmont (2018), Anexo E, itens 4 e 11; Velasco et al. (2021), seção 3.1 | baixa; falso negativo |
+| **L3** Mesmo administrador em muitas empresas | Mesma **pessoa provável** (seis dígitos visíveis do CPF e nome normalizado) com qualificação de administração, ou como representante legal, em `L3_MINIMO_EMPRESAS` (5) ou mais empresas, das quais `L3_MINIMO_ABERTAS_NA_JANELA` (3) abertas em `L3_JANELA_MESES` (12) | FATF/Egmont (2018), itens 4 e 10; Carta Circular BCB 4.001/2020, III, h; Fronzetti Colladon e Remondi (2017); Lei 12.846/2013, art. 5º, III | média; falso positivo |
+| **L4** Cadeia societária em camadas | Empresa sem pessoa física no primeiro nível do quadro e com `L4_MINIMO_NIVEIS` (2) ou mais níveis de sócio pessoa jurídica. Informa em que a cadeia termina (pessoa física, sócio estrangeiro ou pessoa jurídica sem quadro nos dados) | FATF/Egmont (2018), item 8; FATF (2011), § 47; Lei 12.846/2013, art. 5º, III | média; falso positivo |
+| **L5** Sócio estrangeiro (nível 1) | Empresa com sócio de identificador 3 (estrangeiro) no CNPJ. **Sem lista de países**: o nível 2 depende da lista oficial, não conferida | FATF/Egmont (2018), item 4 | baixa; falso negativo |
+| **L7** Fundadores substituídos | Contratada em que nenhum sócio atual entrou até `L7_DIAS_APOS_ABERTURA` (30) dias depois do início da atividade e a entrada mais recente antecede um contrato em até `L7_MESES_ANTES_CONTRATO` (12) meses. Só o retrato único; sócio sem data de entrada impede a regra | FATF/Egmont (2018), item 7 | média; falso positivo |
+| **L8** Recém-aberta com sócio possivelmente agente público | A mesma contratada dispara a T1 **e** a T7. Composição, sem coleta nova. **Possível coincidência** | COAF, Casos e Casos (ANR 2021), tipologia 2.7 ("sem empregados" não é verificável) | alta; falso positivo |
+| **L10** Vínculo com empresa sancionada (CEIS/CNEP) | Contratada sem sanção própria vigente que divide sócio-administrador provável ou endereço normalizado com empresa de sanção vigente na data do contrato. Extensão da T6 | FATF/Egmont (2018), item 3; Velasco et al. (2021); Lei 12.846/2013, art. 5º, IV, e | média; falso negativo |
+| **L14** Faixa etária atípica (**sinal fraco**) | Contratada cujos sócios-administradores estão **todos** nas faixas `L14_FAIXAS_ATIPICAS` (1, 2 e 9: até 20 anos e mais de 80), com valor contratado acima de `L14_VALOR_MINIMO` (R$ 100.000,00). Só a faixa é usada, nunca a idade | FATF/Egmont (2018), itens 3 e 10 | baixa; falso positivo |
+| **L15** Muitas atividades econômicas (**sinal fraco**) | Contratada com `L15_MINIMO_CNAES` (20) ou mais CNAEs, ou contratos em `L15_MINIMO_CATEGORIAS` (4) ou mais categorias de objeto | Velasco et al. (2021), seção 3.2 | baixa; falso negativo |
+
+- **Administração** é a lista `QUALIFICACOES_ADMINISTRACAO` (05 Administrador, 10 Diretor, 16 Presidente, 28 Sócio-Gerente, 49 Sócio-Administrador, 50 Empresário, 65 Titular), da tabela de domínio Qualificações do CNPJ.
+- **Sinal fraco** (`sinal_fraco: true` no catálogo e no alerta): sozinho não indica nada.
+- **Pessoas:** vale a regra do RF02 e da T7. Seis dígitos e o nome dão "pessoa provável" ou "possível coincidência", nunca identificação, e nada é fundido. Sobrenome igual não entra em regra nenhuma (parentesco não é dado aberto).
+- **API:** `GET /tipologias` e os alertas ganham `grupo` (`contratacao`, `lavagem` ou `combinacao`) e `sinal_fraco`. `POST /casos/{id}/alertas/executar` aceita os códigos novos em `tipologias` (até 30 itens) e os limiares numéricos novos em `parametros` (os nomes das variáveis acima, em minúsculas).
+- **Dados novos guardados na resolução:** em cada estabelecimento, `cnaes_secundarios`, `endereco_com_complemento`, `pais` e `nome_cidade_exterior`; em cada vínculo `socio_de`, `pais`, `faixa_etaria` e `qualificacao_representante`. Casos coletados antes desta versão precisam de nova coleta do CNPJ para a L15 e para a separação por complemento da L1.
+
+### Não implementado
+
+- **L2** (telefone ou e-mail compartilhado): o conector não guarda telefone, e a ficha recomenda só em combinação.
+- **L5, nível 2** (lista de jurisdições): depende da IN RFB 1.037/2010, não conferida.
+- **L7, parte (b)** (troca de sócios entre duas coletas): o monitoramento já avisa a mudança de quadro, mas não gera alerta de tipologia.
+- **L9, L11 (RF05), L12 e L13:** dependem de decisão do orientador.
+
 ## Fontes reais e piloto com dados públicos
 
 Em 17/11/2026 os conectores foram conferidos contra as **fontes reais**, para preparar um piloto em que um delegado simula uma investigação com dados públicos (não é investigação sigilosa). Só houve coleta passiva (`GET`, `HEAD` e a listagem do compartilhamento público da Receita), com no máximo uma requisição por segundo em cada fonte e sem baixar nenhuma base completa. Os testes automatizados continuam **só com dados sintéticos**; os arquivos reais ficam em `dados-reais/`, que está no `.gitignore` e no `.dockerignore`.

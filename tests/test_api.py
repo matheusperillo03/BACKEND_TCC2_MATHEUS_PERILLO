@@ -283,7 +283,11 @@ def test_executar_e_listar_alertas(cliente, caso_carregado):
     r = cliente.post(f"/casos/{caso_carregado}/alertas/executar", headers=h)
     assert r.status_code == 200, r.text
     alertas = r.json()
-    assert sorted(a["tipologia"] for a in alertas) == ["T1", "T1", "T2", "T3", "T3", "T4", "T4"]
+    # As fixtures têm duas empresas com sócio estrangeiro: a L5 (baixa) fecha a fila.
+    assert sorted(a["tipologia"] for a in alertas) == [
+        *["L5", "L5"],
+        *["T1", "T1", "T2", "T3", "T3", "T4", "T4"],
+    ]
     # T1 é a primeira tipologia com limiar; a lista vem por severidade, então T4 abre a fila.
     assert alertas[0]["tipologia"] == "T4"
     alertas_por_tipologia = {x["tipologia"]: x for x in alertas}
@@ -451,7 +455,7 @@ def test_relatorio_json_e_markdown(cliente, caso_carregado):
         "auditoria",
         "sugestoes_resolucao",
     }
-    assert d["resumo"]["alertas"] == 7 and d["resumo"]["capturas"] == 5
+    assert d["resumo"]["alertas"] == 9 and d["resumo"]["capturas"] == 5
     assert d["custodia_integra"] is True and all(
         len(c["sha256_registrado"]) == 64 for c in d["custodia"]
     )

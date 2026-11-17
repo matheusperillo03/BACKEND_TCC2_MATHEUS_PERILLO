@@ -270,7 +270,7 @@ def test_h12_relatorio_mostra_a_situacao_de_cada_alerta(cliente, caso_carregado)
 
 
 def test_h13_tabela_unica_cobre_todas_as_tipologias():
-    assert set(POLITICAS) == set(tipologias.TIPOLOGIAS) == {f"T{n}" for n in range(1, 11)}
+    assert set(POLITICAS) == set(tipologias.TIPOLOGIAS) > {f"T{n}" for n in range(1, 11)}
     for politica in POLITICAS.values():
         assert politica.severidade in SEVERIDADES
         assert politica.prefere_evitar in ("falso_negativo", "falso_positivo")
@@ -1143,7 +1143,8 @@ def test_postgres_horizonte1_com_o_papel_da_aplicacao(postgres_vazio, tmp_path, 
         )
         assert r.status_code == 200 and r.json()["comparacao"]["mesmo_conteudo"] is True
         alertas = _executar(cliente, caso_id)
-        assert [a["tipologia"] for a in alertas][:2] == ["T4", "T4"] and len(alertas) == 7
+        # Sete alertas das T e dois da L5; a T4 (alta) abre a fila.
+        assert [a["tipologia"] for a in alertas][:2] == ["T4", "T4"] and len(alertas) == 9
         assert _decidir(cliente, caso_id, alertas[0]["id"], "confirmado", "ok").status_code == 200
         assert (
             _decidir(cliente, caso_id, alertas[0]["id"], "descartado", "revisto").status_code == 200

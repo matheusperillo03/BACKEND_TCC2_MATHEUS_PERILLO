@@ -125,7 +125,8 @@ def test_t3_respeita_o_limiar_e_ignora_empresa_sem_capital(sessao_caso):
 
 def test_executar_substitui_alertas_anteriores(sessao_caso):
     sessao, caso_id = sessao_caso
-    assert len(tipologias.executar(sessao, caso_id, PADRAO)) == 7
+    # Sete alertas das T e dois da L5 (sócio estrangeiro nas fixtures).
+    assert len(tipologias.executar(sessao, caso_id, PADRAO)) == 9
     assert len(tipologias.executar(sessao, caso_id, PADRAO, ["T2"])) == 1
     from sqlalchemy import select
 
@@ -133,7 +134,7 @@ def test_executar_substitui_alertas_anteriores(sessao_caso):
 
     # A execução parcial substitui só os alertas das tipologias pedidas; os demais ficam.
     alertas = list(sessao.execute(select(Alerta).where(Alerta.caso_id == caso_id)).scalars())
-    assert len(alertas) == 7 and sum(a.tipologia == "T2" for a in alertas) == 1
+    assert len(alertas) == 9 and sum(a.tipologia == "T2" for a in alertas) == 1
     assert len(tipologias.executar(sessao, caso_id, PADRAO, ["T2", "T2"])) == 1
 
 

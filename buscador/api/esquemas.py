@@ -254,6 +254,10 @@ class TipologiaSaida(BaseModel):
     base: str
     fontes: list[str]
     parametros: list[ParametroTipologia]
+    # "contratacao" (T), "lavagem" (L) ou "combinacao".
+    grupo: str = "contratacao"
+    # Sinal fraco: sozinho não indica nada; só pesa no alerta de combinação.
+    sinal_fraco: bool = False
 
 
 class MonitoramentoEntrada(BaseModel):
@@ -400,15 +404,32 @@ class ParametrosTipologias(BaseModel):
     t5_minimo_contratacoes: int | None = Field(default=None, ge=2, le=1_000)
     t8_percentual_limite: float | None = Field(default=None, gt=0, le=1_000)
     t8_percentual_limite_reforma: float | None = Field(default=None, gt=0, le=1_000)
+    # Tipologias de lavagem (L).
+    l1_minimo_estabelecimentos: int | None = Field(default=None, ge=2, le=10_000)
+    l1_janela_abertura_dias: int | None = Field(default=None, ge=1, le=36_500)
+    l1_minimo_abertas_na_janela: int | None = Field(default=None, ge=2, le=10_000)
+    l3_minimo_empresas: int | None = Field(default=None, ge=2, le=10_000)
+    l3_minimo_abertas_na_janela: int | None = Field(default=None, ge=1, le=10_000)
+    l3_janela_meses: int | None = Field(default=None, ge=1, le=1_200)
+    l4_minimo_niveis: int | None = Field(default=None, ge=2, le=20)
+    l7_dias_apos_abertura: int | None = Field(default=None, ge=0, le=36_500)
+    l7_meses_antes_contrato: int | None = Field(default=None, ge=1, le=1_200)
+    l14_valor_minimo: float | None = Field(default=None, ge=0, le=1e12)
+    l15_minimo_cnaes: int | None = Field(default=None, ge=2, le=1_000)
+    l15_minimo_categorias: int | None = Field(default=None, ge=2, le=100)
+
+
+CodigoTipologia = Literal[
+    "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10",
+    "L1", "L3", "L4", "L5", "L7", "L8", "L10", "L14", "L15",
+]  # fmt: skip
 
 
 class ExecutarAlertasEntrada(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parametros: ParametrosTipologias = Field(default_factory=ParametrosTipologias)
-    tipologias: (
-        list[Literal["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10"]] | None
-    ) = Field(default=None, max_length=10)
+    tipologias: list[CodigoTipologia] | None = Field(default=None, max_length=30)
 
 
 class DecisaoEntrada(BaseModel):
@@ -452,6 +473,8 @@ class AlertaSaida(BaseModel):
     tipologia_nome: str
     prefere_evitar: str
     politica_erro: str
+    grupo: str = "contratacao"
+    sinal_fraco: bool = False
     # RF12 (H12): situação, decisão em vigor e histórico completo das decisões.
     situacao: Literal["pendente", "confirmado", "descartado"]
     decisao: DecisaoSaida | None

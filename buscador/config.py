@@ -187,6 +187,32 @@ class Configuracao(BaseSettings):
     # T10 (cláusula restritiva): expressões regulares extras, separadas por ";;".
     t10_expressoes_extras: str = ""
 
+    # ---- Tipologias de lavagem e ocultação (L) ------------------------------------------------
+    # Todos os limiares abaixo são DECISÃO DO AUTOR, a validar com o orientador (critérios e
+    # fontes em ``buscador/tipologias/lavagem.py``).
+    # L1 (endereço de registro em massa): empresas ativas no mesmo endereço, com complemento, e
+    # quantas abertas num intervalo de dias para marcar "abertura concentrada".
+    l1_minimo_estabelecimentos: int = Field(default=5, ge=2, le=10_000)
+    l1_janela_abertura_dias: int = Field(default=180, ge=1, le=36_500)
+    l1_minimo_abertas_na_janela: int = Field(default=3, ge=2, le=10_000)
+    # L3 (mesmo administrador): empresas administradas e quantas abertas em N meses.
+    l3_minimo_empresas: int = Field(default=5, ge=2, le=10_000)
+    l3_minimo_abertas_na_janela: int = Field(default=3, ge=1, le=10_000)
+    l3_janela_meses: int = Field(default=12, ge=1, le=1_200)
+    # L4 (cadeia em camadas): níveis de sócio pessoa jurídica sem pessoa física no primeiro.
+    l4_minimo_niveis: int = Field(default=2, ge=2, le=20)
+    # L7 (fundadores substituídos): tolerância depois do início e janela antes do contrato.
+    l7_dias_apos_abertura: int = Field(default=30, ge=0, le=36_500)
+    l7_meses_antes_contrato: int = Field(default=12, ge=1, le=1_200)
+    # L14 (sinal fraco): valor contratado mínimo e faixas etárias atípicas (códigos do layout).
+    l14_valor_minimo: float = Field(default=100_000.0, ge=0, le=1e12, allow_inf_nan=False)
+    l14_faixas_atipicas: str = "1,2,9"
+    # L15 (sinal fraco): número de CNAEs e de categorias de objeto contratadas.
+    l15_minimo_cnaes: int = Field(default=20, ge=2, le=1_000)
+    l15_minimo_categorias: int = Field(default=4, ge=2, le=100)
+    # Qualificações de sócio que contam como administração (L3, L10 e L14), por vírgula.
+    qualificacoes_administracao: str = "05,10,16,28,49,50,65"
+
     # ---- Monitoramento contínuo (RF06, H18) ---------------------------------------------------
     # Agendador interno (uma thread do próprio serviço). Com mais de um processo da API, ligue-o
     # em um só.
@@ -365,15 +391,33 @@ class Configuracao(BaseSettings):
     def parametros_tipologias(self) -> dict:
         """Limiares e configuração das tipologias. Os numéricos simples podem ser sobrescritos por
         execução; os estruturados (limites por ano, listas e expressões) só pela configuração."""
-        from buscador.tipologias import legislacao
+        from buscador.tipologias import lavagem, legislacao
 
         try:
             limites = legislacao.limites_dispensa(self.t5_limites_dispensa)
             criterio = legislacao.validar_criterio_natureza(self.t5_criterio_natureza)
             expressoes = legislacao.expressoes_extras(self.t10_expressoes_extras)
+            faixas = lavagem.lista_de_codigos(self.l14_faixas_atipicas, "L14_FAIXAS_ATIPICAS")
+            administracao = lavagem.lista_de_codigos(
+                self.qualificacoes_administracao, "QUALIFICACOES_ADMINISTRACAO", tamanho=2
+            )
         except ValueError as erro:
             raise ErroConfiguracao(str(erro)) from erro
         return {
+            "l1_minimo_estabelecimentos": self.l1_minimo_estabelecimentos,
+            "l1_janela_abertura_dias": self.l1_janela_abertura_dias,
+            "l1_minimo_abertas_na_janela": self.l1_minimo_abertas_na_janela,
+            "l3_minimo_empresas": self.l3_minimo_empresas,
+            "l3_minimo_abertas_na_janela": self.l3_minimo_abertas_na_janela,
+            "l3_janela_meses": self.l3_janela_meses,
+            "l4_minimo_niveis": self.l4_minimo_niveis,
+            "l7_dias_apos_abertura": self.l7_dias_apos_abertura,
+            "l7_meses_antes_contrato": self.l7_meses_antes_contrato,
+            "l14_valor_minimo": self.l14_valor_minimo,
+            "l14_faixas_atipicas": faixas,
+            "l15_minimo_cnaes": self.l15_minimo_cnaes,
+            "l15_minimo_categorias": self.l15_minimo_categorias,
+            "qualificacoes_administracao": administracao,
             "t1_dias_minimos": self.t1_dias_minimos,
             "t2_minimo_empresas": self.t2_minimo_empresas,
             "t3_razao_minima": self.t3_razao_minima,

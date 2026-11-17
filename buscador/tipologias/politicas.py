@@ -23,6 +23,9 @@ SEVERIDADES = ("alta", "media", "baixa")
 ORDEM_SEVERIDADE = {nome: posicao for posicao, nome in enumerate(SEVERIDADES)}
 ROTULOS_SEVERIDADE = {"alta": "alta", "media": "média", "baixa": "baixa"}
 
+# Grupos de tipologia, na ordem do catálogo e da execução.
+GRUPOS = ("contratacao", "lavagem", "combinacao")
+
 # Erro que a regra prefere evitar.
 EVITA_FALSO_NEGATIVO = "falso_negativo"
 EVITA_FALSO_POSITIVO = "falso_positivo"
@@ -34,10 +37,17 @@ class Politica:
     severidade: str
     prefere_evitar: str
     politica_erro: str
+    # "contratacao" (T: possível infração antecedente em contratações), "lavagem" (L: possível
+    # ocultação por interposição de pessoas e empresas) ou "combinacao".
+    grupo: str = "contratacao"
+    # Sinal fraco: sozinho não indica nada; só pesa no alerta de combinação.
+    sinal_fraco: bool = False
 
     def __post_init__(self) -> None:
         if self.severidade not in SEVERIDADES:
             raise ValueError(f"severidade desconhecida: {self.severidade}")
+        if self.grupo not in GRUPOS:
+            raise ValueError(f"grupo desconhecido: {self.grupo}")
         if self.prefere_evitar not in (EVITA_FALSO_NEGATIVO, EVITA_FALSO_POSITIVO):
             raise ValueError(f"política de erro desconhecida: {self.prefere_evitar}")
 
@@ -165,6 +175,123 @@ POLITICAS: dict[str, Politica] = {
             "configuradas, mesmo fora do capítulo de habilitação. O falso positivo é frequente "
             "(a expressão citada em outro contexto), por isso a severidade é baixa; cada alerta "
             "traz o trecho literal e a posição para conferência imediata."
+        ),
+    ),
+    # ---- Tipologias de lavagem e ocultação (L): DECISÃO DO AUTOR, a validar com o orientador ---
+    # Critérios e fontes de cada uma em ``tipologias.lavagem`` (docs/lavagem/tipologias-lavagem.md
+    # na monografia). Todas são indício cadastral: nenhuma prova lavagem (RF12).
+    "L1": Politica(
+        nome="Endereço de registro em massa",
+        severidade="baixa",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso negativo: aponta todo endereço (com complemento) em que há "
+            "muitas empresas ativas, mesmo sem contrato público. O falso positivo é alto: centro "
+            "empresarial, escritório de contabilidade usado como domicílio fiscal, coworking e "
+            "MEI registrado na residência. O dado aberto não diz se o endereço é residencial ou "
+            "comercial."
+        ),
+    ),
+    "L3": Politica(
+        nome="Mesmo administrador ou representante em muitas empresas",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso positivo: exige os seis dígitos visíveis do CPF E o nome "
+            "normalizado iguais, qualificação de administração e várias empresas abertas em pouco "
+            "tempo. Ainda assim é pessoa PROVÁVEL, não identificada: homônimo com os mesmos seis "
+            "dígitos é possível. Falso positivo esperado: empresário com várias empresas e holding "
+            "familiar. Aceita falso negativo: sócio sem CPF na fonte não é contado."
+        ),
+    ),
+    "L4": Politica(
+        nome="Cadeia societária em camadas",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso positivo: só dispara quando não há pessoa física no primeiro "
+            "nível e o controle passa por um número mínimo de pessoas jurídicas. Falso positivo "
+            "esperado: grupo econômico legítimo, fundo e companhia aberta. Aceita falso negativo: "
+            "a cadeia só é vista até onde o quadro societário foi coletado no caso."
+        ),
+    ),
+    "L5": Politica(
+        nome="Sócio estrangeiro (nível 1)",
+        severidade="baixa",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso negativo: aponta toda empresa do caso com sócio estrangeiro, "
+            "sem avaliar o país. O falso positivo é alto, porque o investimento estrangeiro é "
+            "legítimo. O nível 2 (lista de jurisdições) não foi implementado: depende da lista "
+            "oficial, ainda não conferida."
+        ),
+    ),
+    "L7": Politica(
+        nome="Fundadores substituídos logo após a abertura",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso positivo: exige que nenhum sócio atual tenha entrado até poucos "
+            "dias depois do início da atividade, que todos tenham data de entrada e que a entrada "
+            "mais recente seja pouco anterior a um contrato. Falso positivo esperado: venda "
+            "legítima da empresa e sucessão familiar. Aceita falso negativo: o dado aberto é o "
+            "quadro atual, sem histórico de quem saiu."
+        ),
+    ),
+    "L8": Politica(
+        nome="Empresa recém-aberta com sócio que possivelmente é agente público",
+        severidade="alta",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso positivo: só dispara quando a mesma contratada dispara a T1 "
+            "(aberta pouco antes do contrato) E a T7 (sócio com os mesmos seis dígitos do CPF e o "
+            "mesmo nome de um servidor do órgão contratante). Herda os homônimos da T7: é possível "
+            "coincidência, não identificação. A parte 'sem empregados' do sinal do COAF não é "
+            "verificável com dado aberto."
+        ),
+    ),
+    "L10": Politica(
+        nome="Vínculo com empresa sancionada ou com pessoa expulsa da administração",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso negativo: aponta a contratada sem sanção própria que divide "
+            "sócio-administrador provável ou endereço com empresa de sanção vigente na data do "
+            "contrato, e o sócio que possivelmente coincide com pessoa expulsa (CEAF). Falso "
+            "positivo esperado: endereço compartilhado legítimo, sócio que saiu antes da sanção e "
+            "homônimo."
+        ),
+    ),
+    "L14": Politica(
+        nome="Sócio em faixa etária atípica em empresa contratada",
+        severidade="baixa",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        grupo="lavagem",
+        sinal_fraco=True,
+        politica_erro=(
+            "Prefere evitar falso positivo: é sinal fraco, que sozinho não indica nada e só pesa "
+            "no alerta de combinação. Só dispara quando TODOS os sócios-administradores estão em "
+            "faixa etária atípica e o valor contratado passa do mínimo. Falso positivo esperado: "
+            "herança, sucessão e empresa familiar. Só a faixa etária é mostrada, nunca a idade."
+        ),
+    ),
+    "L15": Politica(
+        nome="Número excessivo de atividades econômicas",
+        severidade="baixa",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        grupo="lavagem",
+        sinal_fraco=True,
+        politica_erro=(
+            "Prefere evitar falso negativo: é sinal fraco, que sozinho não indica nada e só pesa "
+            "no alerta de combinação. O falso positivo é alto: muitas empresas registram "
+            "atividades a mais por precaução."
         ),
     ),
 }
