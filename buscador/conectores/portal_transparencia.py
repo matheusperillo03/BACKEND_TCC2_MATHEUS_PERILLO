@@ -1,4 +1,5 @@
-"""Conector da API do Portal da Transparência (CGU): CEIS, CNEP e servidores do Executivo Federal.
+"""Conector da API do Portal da Transparência (CGU): CEIS, CNEP, CEPIM, CEAF, convênios e
+servidores do Executivo Federal.
 
 Fatos conferidos na OpenAPI oficial (https://api.portaldatransparencia.gov.br/v3/api-docs, acesso
 em 16/11/2026; ver docs/sistema/fontes-horizonte2.md na monografia):
@@ -41,7 +42,26 @@ testar_fontes_reais.py`` repete o teste e pula a fonte, com aviso, se não houve
   Controladoria-Geral da União aparece como 20125, sem servidores, e 59000, com servidores);
 - chave inválida: HTTP 401, corpo ``{"Erro na API": "Chave de API inválida!"}``.
 
-Só coleta passiva: o conector faz apenas ``GET`` nesses três endpoints de dados abertos.
+CEPIM, CEAF e convênios (tipologias L10 e L16). OpenAPI e API real conferidas em 17/11/2026, com
+uma página de cada rota e a chave do operador (só a estrutura e o formato dos campos foram lidos):
+
+- ``GET /api-de-dados/cepim``: ``cnpjSancionado`` e ``pagina``; array de ``CepimDTO`` (``id``,
+  ``dataReferencia`` em ``DD/MM/AAAA``, ``motivo``, ``orgaoSuperior.nome``,
+  ``pessoaJuridica.cnpjFormatado`` e ``convenio.numero``). O cadastro não traz período;
+- ``GET /api-de-dados/ceaf``: ``nomeSancionado`` e ``pagina`` (a rota aceita ``cpfSancionado``,
+  que este conector NÃO usa, RNF04); array de ``CeafDTO`` (``id``, ``dataPublicacao`` em
+  ``DD/MM/AAAA``, ``punicao.nomePunido``, ``punicao.cpfPunidoFormatado``, que já vem
+  descaracterizado como ``***.NNN.NNN-**``, ``punicao.portaria``, ``punicao.processo``,
+  ``tipoPunicao.descricao`` e ``orgaoLotacao.nome``);
+- ``GET /api-de-dados/convenios``: sem filtro responde 400 ("escolha um período de até 1 mês ou
+  um convenente ou um órgão/entidade ou uma localidade [...] ou um número de convênio"); com
+  ``convenente`` (CNPJ de 14 dígitos) responde 200. Array de ``ConvenioDTO`` (``id``,
+  ``dataInicioVigencia`` e ``dataFinalVigencia`` em ``AAAA-MM-DD``, ``dimConvenio.numero`` e
+  ``.objeto``, ``situacao``, ``convenente.cnpjFormatado``, ``orgao.nome`` e ``orgao.cnpj``,
+  ``valor`` e ``valorLiberado``). PENDENTE: a consulta de teste por ``convenente`` voltou vazia
+  (o CNPJ usado não tinha convênio), então o conector confere o CNPJ de cada item recebido.
+
+Só coleta passiva: o conector faz apenas ``GET`` nesses endpoints de dados abertos.
 """
 
 from __future__ import annotations
@@ -59,6 +79,8 @@ from buscador.conectores.base import (
     ErroConector,
     FonteNaoConfigurada,
     RegistradorCaptura,
+    RegistroConvenio,
+    RegistroExpulsao,
     RegistroSancao,
     RegistroServidor,
     ResultadoColeta,
@@ -67,8 +89,8 @@ from buscador.conectores.base import (
 from buscador.conectores.http_util import BuscadorHttp, Resposta
 from buscador.conectores.parametros import ParametrosPortalTransparencia, validar
 from buscador.custodia import marcar_simulado
-from buscador.resolucao.normalizacao import normalizar_cnpj
-from buscador.seguranca import carregar_json_estrito
+from buscador.resolucao.normalizacao import normalizar_cnpj, normalizar_nome
+from buscador.seguranca import carregar_json_estrito, numero_finito
 
 VARIAVEL_CHAVE = "PORTAL_TRANSPARENCIA_CHAVE"
 CABECALHO_CHAVE = "chave-api-dados"
@@ -77,6 +99,9 @@ CAMINHOS = {
     "ceis": "/api-de-dados/ceis",
     "cnep": "/api-de-dados/cnep",
     "servidores": "/api-de-dados/servidores",
+    "cepim": "/api-de-dados/cepim",
+    "ceaf": "/api-de-dados/ceaf",
+    "convenios": "/api-de-dados/convenios",
 }
 # Limite documentado no período diurno (o mais restritivo dos dois não restritos).
 LIMITE_DOCUMENTADO_POR_MINUTO = 400
@@ -111,7 +136,8 @@ class ConectorPortalTransparencia(Conector):
     nome = "portal_transparencia"
     # 1.0.0: coleta real de CEIS, CNEP e servidores (antes era um stub).
     # 1.1.0: aceita o CNPJ alfanumérico (letras de A a Z não são mais descartadas).
-    versao = "1.1.0"
+    # 1.2.0: CEPIM, CEAF e convênios (tipologias L10 e L16).
+    versao = "1.2.0"
 
     def __init__(
         self,
@@ -157,6 +183,12 @@ class ConectorPortalTransparencia(Conector):
         ) as http:
             if validos.recurso == "servidores":
                 self._servidores(http, validos, registrar_captura, resultado)
+            elif validos.recurso == "cepim":
+                self._cepim(http, validos, registrar_captura, resultado)
+            elif validos.recurso == "ceaf":
+                self._ceaf(http, validos, registrar_captura, resultado)
+            elif validos.recurso == "convenios":
+                self._convenios(http, validos, registrar_captura, resultado)
             else:
                 self._sancoes(http, validos, registrar_captura, resultado)
         if self.taxa.esperas:
@@ -320,6 +352,154 @@ class ConectorPortalTransparencia(Conector):
             resultado.avisos.append(
                 f"{datas_invalidas} registro(s) do {cadastro} com data de início em formato não "
                 "reconhecido: a data ficou vazia e a tipologia T6 não os considera vigentes."
+            )
+
+    # ---- CEPIM, CEAF e convênios --------------------------------------------------------------
+
+    def _cnpjs_consultados(self, validos, para_que: str) -> list[str]:
+        consultados = [d for d in map(normalizar_cnpj, validos.codigoSancionado) if d]
+        if not consultados:
+            raise ErroConector(
+                f"Informe em 'codigoSancionado' ao menos um CNPJ de 14 posições {para_que} (ou "
+                "use 'do_caso': true)."
+            )
+        return list(dict.fromkeys(consultados))
+
+    def _cepim(self, http, validos, registrar_captura, resultado: ResultadoColeta) -> None:
+        fora_do_filtro = 0
+        for cnpj in self._cnpjs_consultados(validos, "da entidade"):
+            for captura, itens in self._paginas(
+                http,
+                "cepim",
+                {"cnpjSancionado": cnpj},
+                validos.max_paginas,
+                registrar_captura,
+                resultado,
+            ):
+                for item in itens:
+                    if not isinstance(item, dict):
+                        continue
+                    pessoa = _objeto(item.get("pessoaJuridica"))
+                    documento = normalizar_cnpj(pessoa.get("cnpjFormatado"))
+                    if not documento or documento[:8] != cnpj[:8]:
+                        fora_do_filtro += 1
+                        continue
+                    resultado.registros.append(
+                        RegistroSancao(
+                            captura_id=captura.id,
+                            cadastro="CEPIM",
+                            id_registro=_texto(item.get("id")),
+                            cnpj_sancionado=documento,
+                            nome_sancionado=_texto(pessoa.get("razaoSocialReceita"))
+                            or _texto(pessoa.get("nome")),
+                            # O CEPIM não tem período: as datas de início e de fim ficam vazias.
+                            tipo_sancao=_texto(item.get("motivo")),
+                            orgao_sancionador=_texto(
+                                _objeto(item.get("orgaoSuperior")).get("nome")
+                            ),
+                            numero_processo=_texto(_objeto(item.get("convenio")).get("numero")),
+                            url_fonte=captura.url_ou_arquivo,
+                            data_referencia=data_para_iso(item.get("dataReferencia")),
+                        )
+                    )
+        if fora_do_filtro:
+            resultado.avisos.append(
+                f"{fora_do_filtro} registro(s) do CEPIM sem CNPJ ou de CNPJ diferente do "
+                "consultado foram ignorados."
+            )
+
+    def _ceaf(self, http, validos, registrar_captura, resultado: ResultadoColeta) -> None:
+        nomes = list(dict.fromkeys(n for n in validos.nomeSancionado if normalizar_nome(n)))
+        if not nomes:
+            raise ErroConector(
+                "Para 'ceaf', informe em 'nomeSancionado' ao menos um nome completo (ou use "
+                "'do_caso': true). A consulta por CPF não é oferecida (RNF04)."
+            )
+        outros_nomes = 0
+        for nome in nomes:
+            procurado = normalizar_nome(nome)
+            for captura, itens in self._paginas(
+                http,
+                "ceaf",
+                {"nomeSancionado": nome},
+                validos.max_paginas,
+                registrar_captura,
+                resultado,
+            ):
+                for item in itens:
+                    punicao = _objeto(_objeto(item).get("punicao"))
+                    pessoa = _objeto(_objeto(item).get("pessoa"))
+                    punido = _texto(punicao.get("nomePunido")) or _texto(pessoa.get("nome"))
+                    # A busca da fonte pode ser por parte do nome: só entra o nome idêntico
+                    # (minimização: quem não foi consultado não vira registro).
+                    if normalizar_nome(punido) != procurado:
+                        outros_nomes += 1
+                        continue
+                    resultado.registros.append(
+                        RegistroExpulsao(
+                            captura_id=captura.id,
+                            id_registro=_texto(item.get("id")),
+                            nome=punido,
+                            cpf=_texto(punicao.get("cpfPunidoFormatado"))
+                            or _texto(pessoa.get("cpfFormatado")),
+                            tipo_punicao=_texto(_objeto(item.get("tipoPunicao")).get("descricao")),
+                            data_publicacao=data_para_iso(item.get("dataPublicacao")),
+                            orgao_lotacao=_texto(_objeto(item.get("orgaoLotacao")).get("nome")),
+                            portaria=_texto(punicao.get("portaria")),
+                            processo=_texto(punicao.get("processo")),
+                            url_fonte=captura.url_ou_arquivo,
+                        )
+                    )
+        if outros_nomes:
+            resultado.avisos.append(
+                f"{outros_nomes} registro(s) do CEAF de nome diferente do consultado não foram "
+                "incorporados."
+            )
+
+    def _convenios(self, http, validos, registrar_captura, resultado: ResultadoColeta) -> None:
+        fora_do_filtro = 0
+        for cnpj in self._cnpjs_consultados(validos, "do convenente"):
+            for captura, itens in self._paginas(
+                http,
+                "convenios",
+                {"convenente": cnpj},
+                validos.max_paginas,
+                registrar_captura,
+                resultado,
+            ):
+                for item in itens:
+                    if not isinstance(item, dict):
+                        continue
+                    convenente = _objeto(item.get("convenente"))
+                    documento = normalizar_cnpj(convenente.get("cnpjFormatado"))
+                    if not documento or documento[:8] != cnpj[:8]:
+                        fora_do_filtro += 1
+                        continue
+                    dimensao = _objeto(item.get("dimConvenio"))
+                    orgao = _objeto(item.get("orgao"))
+                    resultado.registros.append(
+                        RegistroConvenio(
+                            captura_id=captura.id,
+                            id_registro=_texto(item.get("id")),
+                            cnpj_convenente=documento,
+                            nome_convenente=_texto(convenente.get("razaoSocialReceita"))
+                            or _texto(convenente.get("nome")),
+                            numero=_texto(dimensao.get("numero")) or _texto(dimensao.get("codigo")),
+                            objeto=_texto(dimensao.get("objeto")),
+                            data_inicio_vigencia=data_para_iso(item.get("dataInicioVigencia")),
+                            data_fim_vigencia=data_para_iso(item.get("dataFinalVigencia")),
+                            valor=numero_finito(item.get("valor")),
+                            valor_liberado=numero_finito(item.get("valorLiberado")),
+                            situacao=_texto(item.get("situacao")),
+                            orgao_nome=_texto(orgao.get("nome")),
+                            orgao_cnpj=normalizar_cnpj(orgao.get("cnpj")) or "",
+                            url_fonte=captura.url_ou_arquivo,
+                        )
+                    )
+        if fora_do_filtro:
+            resultado.avisos.append(
+                f"{fora_do_filtro} convênio(s) sem CNPJ do convenente ou de CNPJ diferente do "
+                "consultado foram ignorados."
             )
 
     # ---- Servidores ---------------------------------------------------------------------------

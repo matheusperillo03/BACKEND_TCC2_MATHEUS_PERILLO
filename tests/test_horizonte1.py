@@ -1143,8 +1143,8 @@ def test_postgres_horizonte1_com_o_papel_da_aplicacao(postgres_vazio, tmp_path, 
         )
         assert r.status_code == 200 and r.json()["comparacao"]["mesmo_conteudo"] is True
         alertas = _executar(cliente, caso_id)
-        # Sete alertas das T e dois da L5; a T4 (alta) abre a fila.
-        assert [a["tipologia"] for a in alertas][:2] == ["T4", "T4"] and len(alertas) == 9
+        # Sete alertas das T, dois da L5 e dois da L6; a T4 (alta) abre a fila.
+        assert [a["tipologia"] for a in alertas][:2] == ["T4", "T4"] and len(alertas) == 11
         assert _decidir(cliente, caso_id, alertas[0]["id"], "confirmado", "ok").status_code == 200
         assert (
             _decidir(cliente, caso_id, alertas[0]["id"], "descartado", "revisto").status_code == 200

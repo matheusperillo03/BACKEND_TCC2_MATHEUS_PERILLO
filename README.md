@@ -473,6 +473,38 @@ As tipologias T1 a T10 sinalizam possíveis infrações antecedentes em contrata
 - **API:** `GET /tipologias` e os alertas ganham `grupo` (`contratacao`, `lavagem` ou `combinacao`) e `sinal_fraco`. `POST /casos/{id}/alertas/executar` aceita os códigos novos em `tipologias` (até 30 itens) e os limiares numéricos novos em `parametros` (os nomes das variáveis acima, em minúsculas).
 - **Dados novos guardados na resolução:** em cada estabelecimento, `cnaes_secundarios`, `endereco_com_complemento`, `pais` e `nome_cidade_exterior`; em cada vínculo `socio_de`, `pais`, `faixa_etaria` e `qualificacao_representante`. Casos coletados antes desta versão precisam de nova coleta do CNPJ para a L15 e para a separação por complemento da L1.
 
+### Tipologias com coleta pequena (L6, L10 nas partes CEAF e CEPIM, e L16)
+
+| Tipologia | Regra | Base | Severidade e erro que prefere evitar |
+|---|---|---|---|
+| **L6** Porte ou MEI incompatível | Soma do valor dos contratos assinados no ano-calendário (valor inicial; sem ele, o global) **acima** do limite legal de receita do regime. MEI: opção e datas da tabela Simples, só para contratos assinados enquanto a opção valia. Fora do MEI: porte do cadastro (01 microempresa, 03 pequeno porte). No ano de início do MEI, limite proporcional aos meses. Um alerta por empresa, ano e regime | Velasco et al. (2021), seção 3.2; LC 123/2006, arts. 3º e 18-A; LC 238/2026, arts. 2º e 10 | média; falso positivo |
+| **L10** (CEPIM e CEAF) | CEPIM: a entidade impedida conta como "sancionada" no vínculo por sócio ou endereço (o cadastro não tem período, e o alerta diz isso). CEAF: sócio de contratada ou de convenente com os mesmos seis dígitos do CPF e o mesmo nome de uma pessoa expulsa. **Possível coincidência** | FATF/Egmont (2018), item 3 | média; falso negativo |
+| **L16** Entidade sem fins lucrativos convenente | Convenente de natureza jurídica em `L16_NATUREZAS_SEM_FINS_LUCRATIVOS` (3069, 3301, 3999) com ao menos um sinal: (a) aberta menos de `L16_DIAS_MINIMOS` (180) dias antes da vigência; (b) registro no CEPIM; (c) dirigente que possivelmente coincide com servidor do órgão concedente; (d) dirigente que também é sócio de empresa no mesmo endereço, do mesmo CNAE principal ou recém-aberta | COAF, Casos e Casos (ANR 2021), 2.1, 2.8 e 2.9; Velasco et al. (2021), seção 5 | média; falso negativo |
+
+**Limites da L6** (`buscador/tipologias/legislacao.py`, conferidos no texto do Planalto em 17/11/2026):
+
+| Regime | Limite anual | Fonte |
+|---|---|---|
+| MEI, até 2026 | R$ 81.000,00 (R$ 6.750,00 por mês no ano de início) | LC 123/2006, art. 18-A, §§ 1º e 2º |
+| MEI, 2027 | R$ 110.000,00 (R$ 9.166,67 por mês) | LC 238/2026, art. 2º |
+| MEI, a partir de 2028 | R$ 140.000,00 (R$ 11.666,67 por mês) | LC 238/2026, arts. 1º e 10, I |
+| Microempresa | R$ 360.000,00 | LC 123/2006, art. 3º, I |
+| Empresa de pequeno porte | R$ 4.800.000,00 | LC 123/2006, art. 3º, II |
+
+Outros anos do MEI entram por `L6_LIMITES_MEI` (JSON, como os limites da T5). **Tolerância da transição** (`L6_TOLERANCIA_TRANSICAO=1`, decisão do autor): o art. 18-A, § 1º, mede a receita do ano anterior, então o valor de um ano é comparado com o maior entre o limite daquele ano e o do ano seguinte. Em 2026, por exemplo, só dispara acima de R$ 110.000,00; o alerta mostra o limite legal e o aplicado. Limites anteriores a 2026 não foram conferidos (vale a linha de 2026).
+
+**Coleta nova:**
+
+- `cnpj_arquivo` (versão 1.3.0) lê também a tabela **Simples** (arquivo com `SIMPLES` no nome; 7 campos). A opção e as datas ficam nos atributos da empresa (`opcao_mei`, `data_opcao_mei`, `data_exclusao_mei` e os três do Simples). `scripts/recortar_cnpj.py` recorta também o `Simples.zip`. A leitura do arquivo real não foi testada.
+- `portal_transparencia` (versão 1.2.0) aceita três recursos novos, conferidos na API real em 17/11/2026 (uma página de cada, só a estrutura):
+  - `{"recurso":"cepim","codigoSancionado":[CNPJ]}`: vira `sancao` com `cadastro: "CEPIM"`, sem período (`data_referencia`);
+  - `{"recurso":"convenios","codigoSancionado":[CNPJ do convenente]}`: vira a entidade `convenio`, ligada ao convenente por `convenente_de` e ao órgão por `concedente_de`. Sem filtro a API responde 400; o conector usa `convenente` e confere o CNPJ de cada item;
+  - `{"recurso":"ceaf","nomeSancionado":[nome]}`: **só por nome, nunca por CPF**. O CPF do CEAF já vem descaracterizado. Vira `sancao` com `cadastro: "CEAF"` ligada a uma `pessoa` de chave própria (`expulso:...`), nunca fundida. Só entra o registro de nome idêntico ao consultado.
+  - Com `"do_caso": true`: CEPIM e convênios consultam as entidades sem fins lucrativos (pela natureza jurídica) e as convenentes do caso; o CEAF consulta os **nomes** dos sócios pessoa física das contratadas e convenentes (até 100).
+- A T6 continua só com CEIS e CNEP.
+
+**Limitações:** a L6 compara valor contratado, não receita; o porte é o atual. Na L16, a entidade que só veio do Portal (sem natureza jurídica coletada no CNPJ) não é avaliada; o sinal com eleito ou PEP depende da L9. A contratada que tem ela mesma registro no CEPIM não gera alerta próprio (a T6 não cobre o CEPIM).
+
 ### Não implementado
 
 - **L2** (telefone ou e-mail compartilhado): o conector não guarda telefone, e a ficha recomenda só em combinação.

@@ -230,6 +230,20 @@ POLITICAS: dict[str, Politica] = {
             "oficial, ainda não conferida."
         ),
     ),
+    "L6": Politica(
+        nome="Porte ou regime incompatível com o valor contratado",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso positivo: compara o valor contratado no ano com o limite LEGAL "
+            "de receita do regime (MEI, microempresa ou pequeno porte), usa o valor inicial do "
+            "contrato, só conta como MEI os contratos assinados enquanto a opção valia e aplica "
+            "a tolerância da transição de limite. Ainda há falso positivo: contrato plurianual "
+            "não é receita de um ano, e o porte do cadastro é o atual. Aceita falso negativo: "
+            "empresa sem a tabela Simples coletada só é avaliada pelo porte."
+        ),
+    ),
     "L7": Politica(
         nome="Fundadores substituídos logo após a abertura",
         severidade="media",
@@ -264,9 +278,22 @@ POLITICAS: dict[str, Politica] = {
         politica_erro=(
             "Prefere evitar falso negativo: aponta a contratada sem sanção própria que divide "
             "sócio-administrador provável ou endereço com empresa de sanção vigente na data do "
-            "contrato, e o sócio que possivelmente coincide com pessoa expulsa (CEAF). Falso "
-            "positivo esperado: endereço compartilhado legítimo, sócio que saiu antes da sanção e "
-            "homônimo."
+            "contrato (CEIS e CNEP) ou com entidade impedida (CEPIM, que não traz período), e o "
+            "sócio que possivelmente coincide com pessoa expulsa (CEAF). Falso positivo "
+            "esperado: endereço compartilhado legítimo, sócio que saiu antes da sanção e homônimo."
+        ),
+    ),
+    "L16": Politica(
+        nome="Entidade sem fins lucrativos convenente com sinais de fachada",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso negativo: basta um dos sinais (aberta pouco antes da vigência, "
+            "registro no CEPIM, dirigente que possivelmente coincide com servidor do concedente, "
+            "ou dirigente sócio de empresa no mesmo endereço, do mesmo ramo ou recém-aberta). "
+            "Falso positivo esperado: entidade regular nova e dirigente com atuação pública "
+            "legítima. O cruzamento de pessoas é por seis dígitos do CPF e nome, sem fusão."
         ),
     ),
     "L14": Politica(

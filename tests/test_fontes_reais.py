@@ -227,7 +227,14 @@ def test_recorte_do_cnpj_le_os_zips_em_fluxo_e_o_conector_le_o_recorte(tmp_path)
         + socio("90000009", "ALFA SINTETICA", "90000001", "1")  # 90000001 fora do 1º campo
         + socio("90000003", "HOLDING SINTETICA", "90000077", "1"),
     )
-    (zips / "Simples.zip").write_bytes(b"nao e lido")
+    # Tabela Simples (opção pelo Simples e pelo MEI): um ZIP só, lido como os demais.
+    _zip(
+        zips / "Simples.zip",
+        "F.K03200$W.SIMPLES.CSV.D61114",
+        _linha("90000001", "S", "20200101", "00000000", "S", "20200101", "00000000")
+        + _linha("90000009", "N", "00000000", "00000000", "N", "00000000", "00000000"),
+    )
+    (zips / "Cnaes.zip").write_bytes(b"nao e lido")
     saida = tmp_path / "ingestao" / "recorte"
     lista = tmp_path / "lista.txt"
     lista.write_text("# comentário\n90.000.001/0001-29\n90000003\n", encoding="utf-8")
@@ -240,6 +247,7 @@ def test_recorte_do_cnpj_le_os_zips_em_fluxo_e_o_conector_le_o_recorte(tmp_path)
         "empresas": 2,
         "estabelecimentos": 1,
         "socios": 2,
+        "simples": 1,
     }
     assert all(len(o["sha256"]) == 64 for o in manifesto["origem"])
     # As linhas do recorte têm os mesmos bytes das linhas de origem (acento em Latin-1).
@@ -257,7 +265,7 @@ def test_recorte_do_cnpj_le_os_zips_em_fluxo_e_o_conector_le_o_recorte(tmp_path)
     resultado = ConectorCnpjArquivo(dir_base=tmp_path / "ingestao").coletar(
         {"diretorio": "recorte"}, registrar
     )
-    assert len(resultado.registros) == 5 and len(capturas) == 3
+    assert len(resultado.registros) == 6 and len(capturas) == 4
     assert all(m["simulado"] is False for _, m in capturas)
 
 

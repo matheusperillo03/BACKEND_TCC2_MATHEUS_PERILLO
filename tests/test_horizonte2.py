@@ -225,10 +225,10 @@ def test_h19_todas_as_coletas_ficam_registradas_com_conector_e_versao(cliente_h2
     assert len(coletas) == len(COLETAS_H2) and {c["situacao"] for c in coletas} == {"sucesso"}
     conectores = {(c["conector_nome"], c["conector_versao"]) for c in coletas}
     assert conectores == {
-        ("cnpj_arquivo", "1.2.0"),
+        ("cnpj_arquivo", "1.3.0"),
         ("pncp", "1.3.0"),
         ("pncp_termos", "1.0.1"),
-        ("portal_transparencia", "1.1.0"),
+        ("portal_transparencia", "1.2.0"),
         ("tse_arquivo", "1.1.0"),
         ("edital_arquivo", "1.1.1"),
     }

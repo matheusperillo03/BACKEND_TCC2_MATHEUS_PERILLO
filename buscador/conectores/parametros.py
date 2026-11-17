@@ -49,15 +49,25 @@ class ParametrosPncp(_Parametros):
 
 
 CodigoOrgao = Annotated[str, Field(min_length=1, max_length=10, pattern=r"^\d+$")]
+NomePessoa = Annotated[str, Field(min_length=3, max_length=150), AfterValidator(validar_texto)]
 
 
 class ParametrosPortalTransparencia(_Parametros):
-    """``recurso`` escolhe o endpoint. CEIS e CNEP consultam por CNPJ (``codigoSancionado``, ou
-    ``do_caso`` para as contratadas do caso). ``servidores`` consulta por órgão (código SIAPE) e
-    exige ``cnpjOrgao``: o órgão contratante do caso a que o código corresponde."""
+    """``recurso`` escolhe o endpoint. CEIS, CNEP e CEPIM consultam por CNPJ
+    (``codigoSancionado``, ou ``do_caso`` para as contratadas e convenentes do caso).
+    ``convenios`` consulta pelo CNPJ do convenente (``codigoSancionado``, ou ``do_caso`` para as
+    entidades sem fins lucrativos do caso). ``ceaf`` consulta por nome (``nomeSancionado``, ou
+    ``do_caso`` para os sócios pessoa física das contratadas e convenentes), nunca por CPF.
+    ``servidores`` consulta por órgão (código SIAPE) e exige ``cnpjOrgao``: o órgão contratante
+    do caso a que o código corresponde."""
 
-    recurso: Literal["ceis", "cnep", "servidores"]
+    recurso: Literal["ceis", "cnep", "servidores", "cepim", "ceaf", "convenios"]
+    # CEIS, CNEP e CEPIM: CNPJ sancionado. Convênios: CNPJ do convenente.
     codigoSancionado: Annotated[list[Documento], BeforeValidator(_lista)] = Field(
+        default_factory=list, max_length=100
+    )
+    # CEAF: nome completo da pessoa (a consulta por CPF não é oferecida, RNF04).
+    nomeSancionado: Annotated[list[NomePessoa], BeforeValidator(_lista)] = Field(
         default_factory=list, max_length=100
     )
     orgaoServidorLotacao: CodigoOrgao | None = None
@@ -128,8 +138,9 @@ _DICAS = {
     "diretorio": "texto de 1 a 500 caracteres, sem caracteres de controle",
     "cnpjOrgao": "CNPJ com até 20 caracteres",
     "cnpjFornecedor": "CNPJ ou lista de até 50 CNPJs",
-    "recurso": "ceis, cnep ou servidores",
+    "recurso": "ceis, cnep, cepim, ceaf, convenios ou servidores",
     "codigoSancionado": "CNPJ ou lista de até 100 CNPJs",
+    "nomeSancionado": "nome completo ou lista de até 100 nomes, de 3 a 150 caracteres",
     "orgaoServidorLotacao": "código SIAPE do órgão, só dígitos",
     "orgaoServidorExercicio": "código SIAPE do órgão, só dígitos",
     "contratos": "lista de objetos com cnpj, ano e sequencial",

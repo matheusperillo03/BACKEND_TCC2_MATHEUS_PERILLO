@@ -25,6 +25,15 @@ Horizonte 2 (H19):
 - Edital: entidade ``edital`` (chave = nome do arquivo), com a captura do texto.
 - De qualquer CPF que chegue completo, só os seis dígitos centrais são guardados (RNF04).
 
+Tipologias de lavagem (L6, L10 e L16):
+- Simples: não é entidade; a opção pelo Simples e pelo MEI, com as datas, entra nos atributos da
+  empresa.
+- CEPIM: entidade ``sancao`` como o CEIS e o CNEP, sem período (só a data de referência).
+- Expulsão (CEAF): entidade ``sancao`` ligada por ``sancionada_em`` a uma ``pessoa`` de chave
+  própria (``expulso:<CPF descaracterizado>|<nome>``), nunca fundida com sócio ou servidor.
+- Convênio: entidade ``convenio`` (chave = id do Portal), ligada ao convenente (empresa) por
+  ``convenente_de`` e ao órgão concedente por ``concedente_de``.
+
 Proveniência: ``atributos["origem_atributos"]`` guarda, para cada atributo, a captura que forneceu
 o valor em vigor. As tipologias citam essa captura como evidência (e não "a primeira fonte").
 
@@ -45,12 +54,15 @@ from buscador.conectores.base import (
     Registro,
     RegistroCandidato,
     RegistroContrato,
+    RegistroConvenio,
     RegistroDoacao,
     RegistroEdital,
     RegistroEmpresa,
     RegistroEstabelecimento,
+    RegistroExpulsao,
     RegistroSancao,
     RegistroServidor,
+    RegistroSimples,
     RegistroSocio,
     RegistroTermo,
 )
@@ -103,7 +115,16 @@ def sem_cpf_em_texto_livre(registro: Registro) -> Registro:
     return dataclasses.replace(registro, **trocas) if trocas else registro
 
 
-TIPOS_ENTIDADE = ("empresa", "pessoa", "orgao", "contrato", "sancao", "candidato", "edital")
+TIPOS_ENTIDADE = (
+    "empresa",
+    "pessoa",
+    "orgao",
+    "contrato",
+    "sancao",
+    "candidato",
+    "edital",
+    "convenio",
+)
 TIPOS_ARESTA = (
     "socio_de",
     "contratado_por",
@@ -116,9 +137,13 @@ TIPOS_ARESTA = (
     "edital_de",
     # Entidade citada num documento, aceita pelo investigador a partir de uma sugestão da IA (H22).
     "citado_em",
+    # Convênio do Portal da Transparência (L16): convenente e órgão concedente.
+    "convenente_de",
+    "concedente_de",
 )
 PREFIXO_SERVIDOR = "servidor:"
 PREFIXO_DOADOR = "doador:"
+PREFIXO_EXPULSO = "expulso:"
 ORIGEM_ATRIBUTOS = "origem_atributos"
 MAX_GRUPO_PADRAO = 50
 
@@ -133,6 +158,9 @@ _ORDEM = {
     RegistroCandidato: 7,
     RegistroDoacao: 8,
     RegistroEdital: 9,
+    RegistroSimples: 10,
+    RegistroExpulsao: 11,
+    RegistroConvenio: 12,
 }
 
 
@@ -298,6 +326,12 @@ class Resolvedor:
                 self._doacao(registro)
             elif isinstance(registro, RegistroEdital):
                 self._edital(registro)
+            elif isinstance(registro, RegistroSimples):
+                self._simples(registro)
+            elif isinstance(registro, RegistroExpulsao):
+                self._expulsao(registro)
+            elif isinstance(registro, RegistroConvenio):
+                self._convenio(registro)
         self._derivar_mesmo_endereco()
         self.sessao.flush()
         return self.estatisticas
@@ -731,6 +765,7 @@ class Resolvedor:
             "orgao_sancionador": r.orgao_sancionador,
             "numero_processo": r.numero_processo,
             "url_fonte": r.url_fonte,
+            "data_referencia": r.data_referencia,
         }
         sancao, nova = self._obter_ou_criar(
             "sancao",
@@ -755,6 +790,118 @@ class Resolvedor:
                 "data_fim": r.data_fim,
             },
         )
+
+    # ---- Lavagem: Simples, CEAF e convênios ----------------------------------------------------
+
+    def _simples(self, r: RegistroSimples) -> None:
+        """Opção pelo Simples e pelo MEI (tabela Simples do CNPJ). Só a opção e as datas."""
+        empresa = self._empresa_por_basico(r.cnpj_basico, "", r.captura_id, "simples")
+        # Escrita direta, e não ``_atualizar``: a data de exclusão que deixou de existir (nova
+        # opção) precisa voltar a ficar vazia, em vez de manter o valor da coleta anterior.
+        novos = {
+            "opcao_simples": r.opcao_simples,
+            "data_opcao_simples": data_layout_para_iso(r.data_opcao_simples),
+            "data_exclusao_simples": data_layout_para_iso(r.data_exclusao_simples),
+            "opcao_mei": r.opcao_mei,
+            "data_opcao_mei": data_layout_para_iso(r.data_opcao_mei),
+            "data_exclusao_mei": data_layout_para_iso(r.data_exclusao_mei),
+        }
+        atributos = dict(empresa.atributos or {})
+        origem = dict(atributos.get(ORIGEM_ATRIBUTOS) or {})
+        atributos.update(novos)
+        origem.update(dict.fromkeys(novos, r.captura_id))
+        atributos[ORIGEM_ATRIBUTOS] = origem
+        empresa.atributos = atributos
+        flag_modified(empresa, "atributos")
+        self.estatisticas.entidades_atualizadas += 1
+
+    def _expulsao(self, r: RegistroExpulsao) -> None:
+        # Só o necessário (RNF04): nome, dígitos visíveis do CPF e o registro da punição.
+        pessoa = self._pessoa(
+            r.nome,
+            r.cpf,
+            r.captura_id,
+            "ceaf",
+            escopo=f"ceaf:{r.id_registro}",
+            prefixo=PREFIXO_EXPULSO,
+            papel_fonte="expulso",
+        )
+        identidade = r.id_registro or f"{r.nome}:{r.data_publicacao}"
+        chave = f"CEAF:{identidade}"
+        atributos = {
+            "cadastro": "CEAF",
+            "id_registro": r.id_registro,
+            "nome_sancionado": r.nome,
+            "tipo_sancao": r.tipo_punicao,
+            "data_inicio": r.data_publicacao,
+            "orgao_sancionador": r.orgao_lotacao,
+            "numero_processo": r.processo,
+            "portaria": r.portaria,
+            "url_fonte": r.url_fonte,
+        }
+        sancao, nova = self._obter_ou_criar(
+            "sancao",
+            chave,
+            rotulo=f"CEAF: {r.tipo_punicao or 'expulsão'} ({r.nome})",
+            identificador=f"CEAF-{r.id_registro}" if r.id_registro else "CEAF",
+            atributos=atributos,
+            captura_id=r.captura_id,
+            papel="ceaf",
+        )
+        if not nova:
+            self._atualizar(sancao, r.captura_id, **atributos)
+        self._aresta(
+            pessoa,
+            sancao,
+            "sancionada_em",
+            r.captura_id,
+            chave=chave,
+            atributos={"cadastro": "CEAF", "data_inicio": r.data_publicacao, "data_fim": ""},
+        )
+
+    def _convenio(self, r: RegistroConvenio) -> None:
+        convenente = self._empresa_por_basico(
+            r.cnpj_convenente[:8], r.nome_convenente, r.captura_id, "convenente"
+        )
+        identidade = r.id_registro or f"{r.cnpj_convenente}:{r.numero}"
+        atributos = {
+            "id_registro": r.id_registro,
+            "numero": r.numero,
+            "objeto": r.objeto,
+            "cnpj_convenente": r.cnpj_convenente,
+            "data_inicio_vigencia": r.data_inicio_vigencia,
+            "data_fim_vigencia": r.data_fim_vigencia,
+            "valor": r.valor,
+            "valor_liberado": r.valor_liberado,
+            "situacao": r.situacao,
+            "orgao_nome": r.orgao_nome,
+            "orgao_cnpj": r.orgao_cnpj,
+            "url_fonte": r.url_fonte,
+        }
+        convenio, novo = self._obter_ou_criar(
+            "convenio",
+            identidade,
+            rotulo=f"Convênio {r.numero or r.id_registro}",
+            identificador=r.numero or r.id_registro,
+            atributos=atributos,
+            captura_id=r.captura_id,
+            papel="convenio",
+        )
+        if not novo:
+            self._atualizar(convenio, r.captura_id, **atributos)
+        self._aresta(convenente, convenio, "convenente_de", r.captura_id, chave=identidade)
+        nome_orgao = normalizar_nome(r.orgao_nome)
+        if r.orgao_cnpj or nome_orgao:
+            orgao, _ = self._obter_ou_criar(
+                "orgao",
+                r.orgao_cnpj or f"sem-cnpj:{nome_orgao}",
+                rotulo=r.orgao_nome or f"Órgão {r.orgao_cnpj}",
+                identificador=r.orgao_cnpj,
+                atributos={"cnpj": r.orgao_cnpj, "razao_social": r.orgao_nome},
+                captura_id=r.captura_id,
+                papel="orgao_concedente",
+            )
+            self._aresta(orgao, convenio, "concedente_de", r.captura_id, chave=identidade)
 
     def _servidor(self, r: RegistroServidor) -> None:
         orgao, _ = self._obter_ou_criar(

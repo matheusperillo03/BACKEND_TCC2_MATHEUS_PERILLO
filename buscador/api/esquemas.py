@@ -417,11 +417,12 @@ class ParametrosTipologias(BaseModel):
     l14_valor_minimo: float | None = Field(default=None, ge=0, le=1e12)
     l15_minimo_cnaes: int | None = Field(default=None, ge=2, le=1_000)
     l15_minimo_categorias: int | None = Field(default=None, ge=2, le=100)
+    l16_dias_minimos: int | None = Field(default=None, ge=0, le=36_500)
 
 
 CodigoTipologia = Literal[
     "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10",
-    "L1", "L3", "L4", "L5", "L7", "L8", "L10", "L14", "L15",
+    "L1", "L3", "L4", "L5", "L6", "L7", "L8", "L10", "L14", "L15", "L16",
 ]  # fmt: skip
 
 

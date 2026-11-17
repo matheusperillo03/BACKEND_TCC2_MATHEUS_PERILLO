@@ -212,10 +212,13 @@ class RegistroTermo:
 
 @dataclass
 class RegistroSancao:
-    """Registro do CEIS ou do CNEP (Portal da Transparência) de uma pessoa jurídica."""
+    """Registro do CEIS, do CNEP ou do CEPIM (Portal da Transparência) de uma pessoa jurídica.
+
+    O CEPIM (entidades privadas sem fins lucrativos impedidas) não traz período: só a data de
+    referência do cadastro, em ``data_referencia``."""
 
     captura_id: str
-    cadastro: str  # CEIS | CNEP
+    cadastro: str  # CEIS | CNEP | CEPIM
     id_registro: str
     cnpj_sancionado: str  # 14 posições (numérico ou alfanumérico)
     nome_sancionado: str = ""
@@ -224,6 +227,60 @@ class RegistroSancao:
     tipo_sancao: str = ""
     orgao_sancionador: str = ""
     numero_processo: str = ""
+    url_fonte: str = ""
+    data_referencia: str = ""  # AAAA-MM-DD (CEPIM)
+
+
+@dataclass
+class RegistroSimples:
+    """Linha da tabela Simples dos dados abertos do CNPJ: opção pelo Simples e pelo MEI, com as
+    datas de opção e de exclusão (metadados do CNPJ, "Dados do Simples")."""
+
+    captura_id: str
+    cnpj_basico: str
+    opcao_simples: str = ""  # S | N | vazio (outros)
+    data_opcao_simples: str = ""  # AAAAMMDD, como no layout
+    data_exclusao_simples: str = ""
+    opcao_mei: str = ""
+    data_opcao_mei: str = ""
+    data_exclusao_mei: str = ""
+
+
+@dataclass
+class RegistroExpulsao:
+    """Registro do CEAF (Cadastro de Expulsões da Administração Federal, Portal da
+    Transparência). O CPF já vem descaracterizado da fonte; só os seis dígitos centrais são
+    guardados de qualquer forma (RNF04)."""
+
+    captura_id: str
+    id_registro: str
+    nome: str
+    cpf: str
+    tipo_punicao: str = ""
+    data_publicacao: str = ""  # AAAA-MM-DD
+    orgao_lotacao: str = ""
+    portaria: str = ""
+    processo: str = ""
+    url_fonte: str = ""
+
+
+@dataclass
+class RegistroConvenio:
+    """Convênio do Poder Executivo Federal (Portal da Transparência)."""
+
+    captura_id: str
+    id_registro: str
+    cnpj_convenente: str  # 14 posições
+    nome_convenente: str = ""
+    numero: str = ""
+    objeto: str = ""
+    data_inicio_vigencia: str = ""  # AAAA-MM-DD
+    data_fim_vigencia: str = ""
+    valor: float | None = None
+    valor_liberado: float | None = None
+    situacao: str = ""
+    orgao_nome: str = ""
+    orgao_cnpj: str = ""
     url_fonte: str = ""
 
 
@@ -310,6 +367,9 @@ Registro = (
     | RegistroCandidato
     | RegistroDoacao
     | RegistroEdital
+    | RegistroSimples
+    | RegistroExpulsao
+    | RegistroConvenio
 )
 
 

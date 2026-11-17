@@ -1,8 +1,9 @@
 """Conector dos dados abertos do CNPJ (Receita Federal), lidos de arquivos locais no layout oficial.
 
 Layout (metadados do CNPJ, Receita Federal): arquivos separados por ``;``, codificação latin-1, sem
-cabeçalho, campos entre aspas. Tabelas usadas: Empresas (7 campos), Estabelecimentos (30 campos) e
-Sócios (11 campos). O CPF do sócio já vem descaracterizado (``***NNNNNN**``). O MVP não baixa o
+cabeçalho, campos entre aspas. Tabelas usadas: Empresas (7 campos), Estabelecimentos (30 campos),
+Sócios (11 campos) e Simples (7 campos: opção pelo Simples e pelo MEI, com as datas; usada pela
+tipologia L6). O CPF do sócio já vem descaracterizado (``***NNNNNN**``). O MVP não baixa o
 dump completo: lê o que houver na pasta informada.
 
 Conferido com arquivos reais em 17/11/2026 (mês 2026-11; um arquivo de cada tabela, lido em
@@ -58,6 +59,7 @@ from buscador.conectores.base import (
     Registro,
     RegistroEmpresa,
     RegistroEstabelecimento,
+    RegistroSimples,
     RegistroSocio,
     ResultadoColeta,
     Retentativa,
@@ -76,11 +78,16 @@ PADROES = {
     "empresas": ("EMPRECSV", "EMPRESAS"),
     "estabelecimentos": ("ESTABELE", "ESTABELECIMENTOS"),
     "socios": ("SOCIOCSV", "SOCIOS"),
+    # Nome oficial conferido na listagem de 11/2026: ``Simples.zip`` (o arquivo de dentro traz
+    # ``SIMPLES.CSV`` no nome). A leitura do arquivo real de 0,31 GB NÃO foi testada: como nas
+    # outras tabelas, o caminho é recortar antes (``scripts/recortar_cnpj.py``).
+    "simples": ("SIMPLES",),
 }
 
 CAMPOS_EMPRESAS = 7
 CAMPOS_ESTABELECIMENTOS = 30
 CAMPOS_SOCIOS = 11
+CAMPOS_SIMPLES = 7
 
 # Nome de cada posição do layout, usado na comparação de capturas campo a campo (RF07, H14).
 NOMES_CAMPOS = {
@@ -138,9 +145,26 @@ NOMES_CAMPOS = {
         "qualificacao_representante",
         "faixa_etaria",
     ),
+    # Metadados do CNPJ, "Dados do Simples" (conferido em 17/11/2026): CNPJ básico; opção pelo
+    # Simples (S, N ou em branco); data de opção e de exclusão do Simples; opção pelo MEI; data
+    # de opção e de exclusão do MEI.
+    "simples": (
+        "cnpj_basico",
+        "opcao_simples",
+        "data_opcao_simples",
+        "data_exclusao_simples",
+        "opcao_mei",
+        "data_opcao_mei",
+        "data_exclusao_mei",
+    ),
 }
 # Posições que identificam o registro em cada tabela (chave da comparação).
-POSICOES_CHAVE = {"empresas": (0,), "estabelecimentos": (0, 1, 2), "socios": (0, 3, 2)}
+POSICOES_CHAVE = {
+    "empresas": (0,),
+    "estabelecimentos": (0, 1, 2),
+    "socios": (0, 3, 2),
+    "simples": (0,),
+}
 
 _ERRO_DIRETORIO = (
     "Diretório não encontrado dentro da raiz de ingestão do CNPJ (CNPJ_DIR_BASE). Informe um "
@@ -250,10 +274,25 @@ def _socio(linha: list[str], captura_id: str) -> RegistroSocio:
     )
 
 
+def _simples(linha: list[str], captura_id: str) -> RegistroSimples:
+    c = _completar(linha, CAMPOS_SIMPLES)
+    return RegistroSimples(
+        captura_id=captura_id,
+        cnpj_basico=_raiz(c[0]),
+        opcao_simples=c[1].upper(),
+        data_opcao_simples=c[2],
+        data_exclusao_simples=c[3],
+        opcao_mei=c[4].upper(),
+        data_opcao_mei=c[5],
+        data_exclusao_mei=c[6],
+    )
+
+
 INTERPRETADORES: dict[str, Callable[[list[str], str], Registro]] = {
     "empresas": _empresa,
     "estabelecimentos": _estabelecimento,
     "socios": _socio,
+    "simples": _simples,
 }
 
 
@@ -282,7 +321,8 @@ class ConectorCnpjArquivo(Conector):
     # 1.1.0: retentativa na abertura e na cópia do arquivo e registros brutos para a comparação.
     # 1.2.0: aceita o CNPJ alfanumérico (letras de A a Z não são mais descartadas) na raiz e
     # na ordem.
-    versao = "1.2.0"
+    # 1.3.0: lê também a tabela Simples (opção pelo Simples e pelo MEI).
+    versao = "1.3.0"
 
     def __init__(
         self,
@@ -343,7 +383,7 @@ class ConectorCnpjArquivo(Conector):
         if not reconhecidos:
             raise ErroConector(
                 "Nenhum arquivo no layout do CNPJ no diretório informado "
-                "(esperados sufixos EMPRECSV, ESTABELE e SOCIOCSV)."
+                "(esperados sufixos EMPRECSV, ESTABELE, SOCIOCSV e SIMPLES)."
             )
 
         relativo = pasta.relative_to(raiz).as_posix()

@@ -29,11 +29,13 @@ from datetime import date, timedelta
 
 from buscador.modelos import Aresta, Entidade
 from buscador.resolucao.normalizacao import normalizar_nome
+from buscador.tipologias import legislacao
 from buscador.tipologias.horizonte2 import (
     AVISO_COINCIDENCIA,
     MAX_ITENS_NO_MOTIVO,
     _arestas,
     _atr,
+    _coincide,
     _identidade_parcial,
     _lista,
     _valor_contratado,
@@ -43,6 +45,7 @@ from buscador.tipologias.motor import (
     SITUACAO_ATIVA,
     AlertaDetectado,
     Contexto,
+    _captura_do_atributo,
     _codigo_situacao,
     _data,
     _por_item,
@@ -73,6 +76,11 @@ FAIXAS_ETARIAS = {
     "9": "mais de 80 anos",
 }
 FAIXAS_ATIPICAS = ("1", "2", "9")
+
+# Naturezas jurídicas tratadas como entidade sem fins lucrativos na L16 (tabela de domínio
+# Naturezas dos dados abertos do CNPJ, arquivo de 11/2026): 3069 Fundação Privada, 3301
+# Organização Social (OS) e 3999 Associação Privada. A escolha das três é decisão do autor.
+NATUREZAS_SEM_FINS_LUCRATIVOS = ("3069", "3301", "3999")
 
 # Identificador de sócio (metadados do CNPJ): 1 pessoa jurídica, 2 pessoa física, 3 estrangeiro.
 SOCIO_PJ, SOCIO_PF, SOCIO_ESTRANGEIRO = "1", "2", "3"
@@ -105,6 +113,10 @@ def parametros_padrao() -> dict:
         "l15_minimo_cnaes": 20,
         "l15_minimo_categorias": 4,
         "qualificacoes_administracao": list(QUALIFICACOES_ADMINISTRACAO),
+        "l6_limites": legislacao.limites_de_receita(),
+        "l6_tolerancia_transicao": True,
+        "l16_dias_minimos": 180,
+        "l16_naturezas_sem_fins_lucrativos": list(NATUREZAS_SEM_FINS_LUCRATIVOS),
     }
 
 
@@ -709,6 +721,9 @@ def tipologia_l8(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 # fraudulento para contratar). Extensão da T6, que só olha a própria contratada.
 
 CADASTROS_COM_PERIODO = ("CEIS", "CNEP")
+# O CEPIM (entidades privadas sem fins lucrativos impedidas) não traz período de sanção: o registro
+# é tratado como impedimento em vigor na data da coleta, e o alerta diz isso.
+CADASTRO_SEM_PERIODO = "CEPIM"
 
 
 def _sancoes_por_entidade(ctx: Contexto) -> dict[str, list[Entidade]]:
@@ -721,8 +736,11 @@ def _sancoes_por_entidade(ctx: Contexto) -> dict[str, list[Entidade]]:
 
 
 def _vigente(sancao: Entidade, dia: date) -> bool:
-    """A sanção cobre a data? CEIS e CNEP têm período; sem data de início, não é aferível."""
+    """A sanção cobre a data? CEIS e CNEP têm período (sem data de início, não é aferível); o
+    CEPIM não tem período e conta como impedimento em vigor."""
     atributos = _atr(sancao)
+    if atributos.get("cadastro") == CADASTRO_SEM_PERIODO:
+        return True
     if atributos.get("cadastro") not in CADASTROS_COM_PERIODO:
         return False
     inicio, fim = _data(atributos.get("data_inicio")), _data(atributos.get("data_fim"))
@@ -736,7 +754,12 @@ def _descricao_sancao(sancao: Entidade) -> str:
         if s.get("data_fim")
         else f"desde {formatar_data(s.get('data_inicio'))}, sem data final informada"
         if s.get("data_inicio")
-        else "sem período informado no cadastro"
+        else "sem período no cadastro"
+        + (
+            f" (data de referência {formatar_data(s.get('data_referencia'))})"
+            if s.get("data_referencia")
+            else ""
+        )
     )
     return (
         f"{s.get('cadastro') or 'cadastro'}, registro {s.get('id_registro') or 'sem id'}: "
@@ -771,8 +794,11 @@ def _vinculos_com_sancionadas(ctx: Contexto, parametros: dict):
             assinatura = _data(_atr(contrato).get("data_assinatura"))
             if assinatura is None:
                 continue
-            # Com sanção própria vigente, o caso é da T6.
-            if any(_vigente(s, assinatura) for s in sancoes.get(contratada_id, [])):
+            # Com sanção própria vigente (CEIS ou CNEP), o caso é da T6.
+            if any(
+                _atr(s).get("cadastro") in CADASTROS_COM_PERIODO and _vigente(s, assinatura)
+                for s in sancoes.get(contratada_id, [])
+            ):
                 continue
             vinculadas: dict[str, list[str]] = {}
             for socio_id, empresas in administra.items():
@@ -870,7 +896,7 @@ def _l10_sancionadas(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
             evidencias=evidencias[: MAX_ITENS_NO_MOTIVO * 3],
             discriminador=f"empresa|{contratada_id}|{outra_id}",
             parametros={
-                "parte": "empresa sancionada (CEIS ou CNEP)",
+                "parte": "empresa sancionada (CEIS, CNEP ou CEPIM)",
                 "vinculo_por_socio": por_socio,
                 "vinculo_por_endereco": any(v.startswith("endereco:") for v in caso["vinculos"]),
                 "sancoes": len(sancoes),
@@ -883,7 +909,8 @@ def _l10_sancionadas(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 
 
 def tipologia_l10(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
-    return _l10_sancionadas(ctx, parametros)
+    """As duas partes da L10: empresa sancionada (CEIS, CNEP e CEPIM) e pessoa expulsa (CEAF)."""
+    return _l10_sancionadas(ctx, parametros) + _l10_expulsos(ctx, parametros)
 
 
 # ---- L14 (sinal fraco): sócio em faixa etária atípica ------------------------------------------
@@ -1052,14 +1079,504 @@ def tipologia_l15(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
     return _por_item("L15", sorted(contratos), regra)
 
 
+# ---- L6: porte ou regime incompatível com o valor contratado -----------------------------------
+#
+# Velasco et al. (2021), seção 3.2: "Incompatible company size: if a self-employed person
+# (Microempreendedor Individual [...]) won public contracts above income limits defined by the
+# Brazilian legislation"; Carta Circular BCB nº 4.001/2020, III, n. Os limites são LEGAIS (LC nº
+# 123/2006 e LC nº 238/2026) e estão em ``legislacao.LIMITES_MEI``, ``LIMITE_ME`` e ``LIMITE_EPP``.
+# Complementa a T3, que compara com o capital social (declarado e frágil).
+#
+# Decisões do autor:
+# - o valor contratado é o valor inicial do contrato (ou o global, dizendo qual) e é somado no
+#   ano da assinatura: contrato plurianual não é receita de um só ano (falso positivo esperado);
+# - o regime é o da data de cada assinatura: MEI pela opção e pelas datas da tabela Simples; fora
+#   do MEI, o porte do cadastro (01 microempresa, 03 pequeno porte), que é o ATUAL;
+# - tolerância da transição: o art. 18-A, § 1º, mede a receita "no ano-calendário anterior", então
+#   quem continua MEI no ano seguinte pode ter faturado até o limite novo. Com a tolerância ligada
+#   (padrão), o valor do ano é comparado com o MAIOR entre o limite do ano e o do ano seguinte;
+# - no ano de início da atividade, o limite do MEI é proporcional aos meses (§ 2º), contado o mês
+#   do início. Para microempresa e pequeno porte a regra usa o limite anual cheio.
+
+_NOMES_REGIME = {
+    "mei": "microempreendedor individual (MEI)",
+    "me": "microempresa",
+    "epp": "empresa de pequeno porte",
+}
+
+
+def _regime_na_data(empresa: Entidade, dia: date) -> str | None:
+    atributos = _atr(empresa)
+    opcao = _data(atributos.get("data_opcao_mei"))
+    exclusao = _data(atributos.get("data_exclusao_mei"))
+    if opcao is not None:
+        if opcao <= dia and (exclusao is None or dia < exclusao):
+            return "mei"
+    elif str(atributos.get("opcao_mei") or "").upper() == "S" and exclusao is None:
+        return "mei"
+    porte = str(atributos.get("porte") or "").strip().zfill(2)
+    return {legislacao.PORTE_ME: "me", legislacao.PORTE_EPP: "epp"}.get(porte)
+
+
+def _limite_do_regime(
+    limites: dict, regime: str, ano: int, inicio: date | None, tolerancia: bool
+) -> dict:
+    """Limite legal do ano e o limite aplicado (com a tolerância e a proporção do início)."""
+    if regime != "mei":
+        linha = limites[regime]
+        return {
+            "limite_legal": linha["anual"],
+            "limite_aplicado": linha["anual"],
+            "fonte": linha["fonte"],
+            "meses": None,
+            "ano_da_tolerancia": None,
+        }
+    _, do_ano = legislacao.limite_mei_do_ano(limites, ano)
+    _, do_seguinte = legislacao.limite_mei_do_ano(limites, ano + 1)
+    meses = 13 - inicio.month if inicio is not None and inicio.year == ano else None
+
+    def valor(linha: dict) -> float:
+        return round(linha["mensal_inicio"] * meses, 2) if meses else linha["anual"]
+
+    aplicado, ano_tolerancia = valor(do_ano), None
+    if tolerancia and valor(do_seguinte) > aplicado:
+        aplicado, ano_tolerancia = valor(do_seguinte), ano + 1
+    return {
+        "limite_legal": valor(do_ano),
+        "limite_aplicado": aplicado,
+        "fonte": do_ano["fonte"],
+        "meses": meses,
+        "ano_da_tolerancia": ano_tolerancia,
+    }
+
+
+def tipologia_l6(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
+    limites: dict = parametros["l6_limites"]
+    tolerancia = bool(parametros["l6_tolerancia_transicao"])
+    grupos: dict[tuple[str, int, str], list[tuple[Entidade, float, str]]] = {}
+    for empresa_id, contratos in sorted(_contratos_por_empresa(ctx).items()):
+        empresa = ctx.entidades[empresa_id]
+        for contrato in contratos:
+            assinatura = _data(_atr(contrato).get("data_assinatura"))
+            valor, base = _valor_contratado(contrato)
+            if assinatura is None or valor is None or valor <= 0:
+                continue
+            regime = _regime_na_data(empresa, assinatura)
+            if regime is not None:
+                grupos.setdefault((empresa_id, assinatura.year, regime), []).append(
+                    (contrato, valor, base)
+                )
+
+    def regra(item) -> AlertaDetectado | None:
+        (empresa_id, ano, regime), itens = item
+        empresa = ctx.entidades[empresa_id]
+        limite = _limite_do_regime(limites, regime, ano, _inicio(empresa), tolerancia)
+        soma = sum(v for _, v, _ in itens)
+        if soma <= limite["limite_aplicado"]:
+            return None
+        atributos = _atr(empresa)
+        if regime == "mei":
+            situacao = (
+                f"era MEI nas datas de assinatura (opção pelo MEI em "
+                f"{formatar_data(atributos.get('data_opcao_mei'))}"
+                + (
+                    f", exclusão em {formatar_data(atributos.get('data_exclusao_mei'))}"
+                    if atributos.get("data_exclusao_mei")
+                    else ", sem exclusão registrada"
+                )
+                + "; tabela Simples do CNPJ)"
+            )
+        else:
+            situacao = (
+                f"tem porte de {_NOMES_REGIME[regime]} no cadastro do CNPJ (porte "
+                f"{str(atributos.get('porte') or '').zfill(2)}, que é o porte ATUAL)"
+            )
+        proporcional = (
+            f" No ano de início da atividade o limite é proporcional a {limite['meses']} meses."
+            if limite["meses"]
+            else ""
+        )
+        tolerado = (
+            f" Com a tolerância da transição, a comparação usou o limite de "
+            f"{limite['ano_da_tolerancia']}, {formatar_moeda(limite['limite_aplicado'])}, maior "
+            f"que o de {ano}."
+            if limite["ano_da_tolerancia"]
+            else ""
+        )
+        contratos_texto = _lista(
+            [
+                f"{c.identificador} ({formatar_moeda(v)}, {b}, assinado em "
+                f"{formatar_data(_atr(c).get('data_assinatura'))})"
+                for c, v, b in itens
+            ]
+        )
+        motivo = (
+            f"A empresa {empresa.rotulo} (CNPJ básico {empresa.identificador}) {situacao} e "
+            f"assinou em {ano} contratos públicos que somam {formatar_moeda(soma)}: "
+            f"{contratos_texto}. O limite de receita bruta anual de {_NOMES_REGIME[regime]} em "
+            f"{ano} é de {formatar_moeda(limite['limite_legal'])} ({limite['fonte']})."
+            f"{proporcional}{tolerado} O valor contratado no ano passa do limite. Indício a "
+            "verificar: valor contratado não é receita do ano (contrato plurianual é pago ao "
+            "longo da vigência), o porte do cadastro pode estar desatualizado e a exclusão do "
+            "regime pode ter sido registrada depois. " + AVISO_PISTA
+        )
+        evidencias = [
+            ctx.evidencia(
+                _captura_do_atributo(
+                    ctx, empresa, "opcao_mei" if regime == "mei" else "porte", "empresas"
+                ),
+                f"Empresa {empresa.rotulo}: "
+                + (
+                    f"opção pelo MEI '{atributos.get('opcao_mei') or ''}', desde "
+                    f"{formatar_data(atributos.get('data_opcao_mei'))} (dados abertos do CNPJ, "
+                    "Simples)"
+                    if regime == "mei"
+                    else f"porte {str(atributos.get('porte') or '').zfill(2)} (dados abertos do "
+                    "CNPJ, Empresas)"
+                ),
+            )
+        ] + [
+            ctx.evidencia(
+                c.captura_id,
+                f"Contrato {c.identificador}: {b} {formatar_moeda(v)}, assinatura em "
+                f"{formatar_data(_atr(c).get('data_assinatura'))} (PNCP)",
+            )
+            for c, v, b in itens[:MAX_ITENS_NO_MOTIVO]
+        ]
+        return AlertaDetectado(
+            tipologia="L6",
+            titulo=(
+                f"{_NOMES_REGIME[regime].capitalize()} com {formatar_moeda(soma)} contratados em "
+                f"{ano}: {empresa.rotulo}"
+            ),
+            motivo=motivo,
+            entidades=[empresa_id] + [c.id for c, _, _ in itens],
+            evidencias=evidencias,
+            discriminador=f"{ano}|{regime}",
+            parametros={
+                "regime": regime,
+                "ano": ano,
+                "soma_contratada": round(soma, 2),
+                "limite_legal": limite["limite_legal"],
+                "limite_aplicado": limite["limite_aplicado"],
+                "fonte_limite": limite["fonte"],
+                "meses_no_ano_de_inicio": limite["meses"],
+                "ano_da_tolerancia": limite["ano_da_tolerancia"],
+                "l6_tolerancia_transicao": tolerancia,
+                "contratos": len(itens),
+            },
+        )
+
+    return _por_item("L6", sorted(grupos.items(), key=lambda g: g[0]), regra)
+
+
+# ---- L10 (parte CEAF): sócio que possivelmente coincide com pessoa expulsa ---------------------
+#
+# GAFI/Egmont (2018), Anexo E, item 3. O CEAF (Cadastro de Expulsões da Administração Federal)
+# traz o CPF já descaracterizado: a comparação é por seis dígitos e nome, sem fusão (RF02).
+
+
+def _l10_expulsos(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
+    expulsoes: dict[str, list[Entidade]] = {}
+    for pessoa_id, sancoes in _sancoes_por_entidade(ctx).items():
+        pessoa = ctx.entidades.get(pessoa_id)
+        if pessoa is not None and pessoa.tipo == "pessoa":
+            ceaf = [s for s in sancoes if _atr(s).get("cadastro") == "CEAF"]
+            if ceaf:
+                expulsoes[pessoa_id] = ceaf
+    if not expulsoes:
+        return []
+    alvos = set(_contratos_por_empresa(ctx)) | {a.origem_id for a in _arestas(ctx, "convenente_de")}
+    quadro = _quadro(ctx)
+    casos = [
+        (ctx.entidades[empresa_id], socio, aresta, ctx.entidades[expulso_id])
+        for empresa_id in sorted(alvos)
+        for socio, aresta in quadro.get(empresa_id, [])
+        if socio.tipo == "pessoa"
+        for expulso_id in sorted(expulsoes)
+        if _coincide(socio, ctx.entidades[expulso_id])
+    ]
+
+    def regra(caso) -> AlertaDetectado:
+        empresa, socio, aresta, expulso = caso
+        cpf, nome = _identidade_parcial(socio)
+        registros = sorted(expulsoes[expulso.id], key=lambda s: s.identificador)
+        motivo = (
+            f"Possível coincidência entre sócio e pessoa expulsa da administração federal: "
+            f"{socio.rotulo} (CPF descaracterizado {cpf}) é sócio de {empresa.rotulo} (CNPJ "
+            f"básico {empresa.identificador}), que tem contrato ou convênio público no caso; e há "
+            f"no CEAF um registro de mesmo nome normalizado ('{nome}') e mesmos dígitos visíveis "
+            f"do CPF: {_lista([_descricao_sancao(s) for s in registros])}. "
+            f"{AVISO_COINCIDENCIA} {AVISO_PISTA}"
+        )
+        return AlertaDetectado(
+            tipologia="L10",
+            titulo=f"Possível coincidência: sócio de {empresa.rotulo} e pessoa do CEAF",
+            motivo=motivo,
+            entidades=[empresa.id, socio.id, expulso.id] + [s.id for s in registros],
+            evidencias=[_evidencia_socio(ctx, socio, aresta, empresa)]
+            + [
+                ctx.evidencia(
+                    s.captura_id,
+                    f"{expulso.rotulo} ({cpf}): {_descricao_sancao(s)} (Portal da Transparência, "
+                    "CEAF)",
+                )
+                for s in registros
+            ],
+            discriminador=f"ceaf|{empresa.id}|{socio.id}|{expulso.id}",
+            parametros={
+                "parte": "pessoa expulsa (CEAF)",
+                "criterio": "seis dígitos visíveis do CPF e nome normalizado iguais",
+                "cpf_descaracterizado": cpf,
+                "nome_normalizado": nome,
+                "registros_ceaf": len(registros),
+                "identidade_confirmada": False,
+            },
+        )
+
+    return _por_item("L10", casos, regra)
+
+
+# ---- L16: entidade sem fins lucrativos convenente com sinais de fachada ------------------------
+#
+# COAF, Casos e Casos (edição ANR 2021), tipologias 2.1 (entidade que "não realiza os serviços"),
+# 2.8 ("dirigentes da organização criam várias empresas com atividade no mesmo segmento de
+# atuação [...] sediadas em um mesmo endereço") e 2.9 (subcontratação de empresas de pessoas
+# ligadas aos dirigentes); Velasco et al. (2021), seção 5 ("farms of shell companies related to
+# social organizations"); GAFI (2011), § 47 ("non-profit entities").
+#
+# Conferido em 17/11/2026 nos dados abertos do CNPJ (um arquivo de Sócios, só contagens): o quadro
+# traz os dirigentes de associações e fundações, com as qualificações 16 (Presidente), 10
+# (Diretor), 05 (Administrador), 18 (Secretário) e 33 (Tesoureiro). O sinal com eleito ou PEP
+# depende da L9 e não entra; o repasse da entidade às empresas é dado bancário (RF10).
+
+
+def tipologia_l16(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
+    dias_minimos = int(parametros["l16_dias_minimos"])
+    naturezas = set(parametros["l16_naturezas_sem_fins_lucrativos"])
+    quadro = _quadro(ctx)
+    sancoes = _sancoes_por_entidade(ctx)
+    convenios: dict[str, list[Entidade]] = {}
+    for a in _arestas(ctx, "convenente_de"):
+        convenio = ctx.entidades.get(a.destino_id)
+        if convenio is not None and convenio.tipo == "convenio":
+            convenios.setdefault(a.origem_id, []).append(convenio)
+    concedentes: dict[str, set[str]] = {}
+    for a in _arestas(ctx, "concedente_de"):
+        concedentes.setdefault(a.destino_id, set()).add(a.origem_id)
+    servidores: dict[str, list[tuple[Entidade, Aresta]]] = {}
+    for a in _arestas(ctx, "servidor_de"):
+        servidor = ctx.entidades.get(a.origem_id)
+        if servidor is not None:
+            servidores.setdefault(a.destino_id, []).append((servidor, a))
+    empresas_do_socio: dict[str, list[tuple[str, Aresta]]] = {}
+    for empresa_id, socios in quadro.items():
+        for socio, aresta in socios:
+            empresas_do_socio.setdefault(socio.id, []).append((empresa_id, aresta))
+
+    def regra(entidade_id: str) -> AlertaDetectado | None:
+        entidade = ctx.entidades.get(entidade_id)
+        if entidade is None or entidade.tipo != "empresa":
+            return None
+        atributos = _atr(entidade)
+        natureza = str(atributos.get("natureza_juridica") or "").strip()
+        # Sem a natureza jurídica (entidade que só veio do Portal), não se afirma que é sem fins
+        # lucrativos: a regra não dispara.
+        if natureza not in naturezas:
+            return None
+        lista = sorted(convenios[entidade_id], key=lambda c: c.identificador)
+        vigencias = [d for c in lista if (d := _data(_atr(c).get("data_inicio_vigencia")))]
+        inicio = _inicio(entidade)
+        dirigentes = [(s, a) for s, a in quadro.get(entidade_id, []) if s.tipo == "pessoa"]
+        sinais: dict[str, str] = {}
+        evidencias = []
+        entidades = [entidade_id] + [c.id for c in lista]
+
+        # (a) aberta pouco antes do início da vigência
+        recentes = [
+            (c, (d - inicio).days)
+            for c in lista
+            if inicio is not None
+            and (d := _data(_atr(c).get("data_inicio_vigencia"))) is not None
+            and (d - inicio).days < dias_minimos
+        ]
+        if recentes:
+            sinais["a"] = (
+                f"iniciou a atividade em {formatar_data(inicio.isoformat())}, menos de "
+                f"{dias_minimos} dias antes do início da vigência de "
+                + _lista([f"{c.identificador} ({dias} dias)" for c, dias in recentes])
+            )
+            est = next(iter(_estabelecimentos(entidade)), None)
+            if est is not None:
+                evidencias.append(
+                    _evidencia_estabelecimento(
+                        ctx,
+                        entidade,
+                        est,
+                        f"início da atividade em {formatar_data(inicio.isoformat())}",
+                    )
+                )
+
+        # (b) registro no CEPIM
+        cepim = [s for s in sancoes.get(entidade_id, []) if _atr(s).get("cadastro") == "CEPIM"]
+        if cepim:
+            sinais["b"] = "tem registro no CEPIM (entidades privadas sem fins lucrativos " + (
+                "impedidas): " + _lista([_descricao_sancao(s) for s in cepim])
+            )
+            entidades += [s.id for s in cepim]
+            evidencias += [
+                ctx.evidencia(
+                    s.captura_id,
+                    f"{entidade.rotulo}: {_descricao_sancao(s)} (Portal da Transparência, CEPIM)",
+                )
+                for s in cepim
+            ]
+
+        # (c) dirigente que possivelmente coincide com servidor do órgão concedente
+        coincidencias = []
+        for convenio in lista:
+            for orgao_id in sorted(concedentes.get(convenio.id, ())):
+                for servidor, aresta_servidor in servidores.get(orgao_id, []):
+                    for dirigente, aresta in dirigentes:
+                        if _coincide(dirigente, servidor):
+                            coincidencias.append(
+                                (dirigente, aresta, servidor, aresta_servidor, orgao_id)
+                            )
+        if coincidencias:
+            vistos = {}
+            for dirigente, aresta, servidor, aresta_servidor, orgao_id in coincidencias:
+                vistos.setdefault(
+                    (dirigente.id, servidor.id),
+                    (dirigente, aresta, servidor, aresta_servidor, orgao_id),
+                )
+            sinais["c"] = (
+                "tem dirigente que possivelmente coincide com servidor do órgão concedente "
+                "(seis dígitos visíveis do CPF e nome normalizado iguais): "
+                + _lista(
+                    [
+                        f"{d.rotulo} ({_identidade_parcial(d)[0]}) e servidor de "
+                        f"{ctx.entidades[o].rotulo}"
+                        for d, _, _, _, o in vistos.values()
+                    ]
+                )
+            )
+            for dirigente, aresta, servidor, aresta_servidor, orgao_id in vistos.values():
+                entidades += [dirigente.id, servidor.id, orgao_id]
+                evidencias.append(_evidencia_socio(ctx, dirigente, aresta, entidade))
+                evidencias.append(
+                    ctx.evidencia(
+                        aresta_servidor.captura_id,
+                        f"Servidor {servidor.rotulo} ({_identidade_parcial(servidor)[0]}) em "
+                        f"{ctx.entidades[orgao_id].rotulo} (Portal da Transparência, servidores)",
+                    )
+                )
+
+        # (d) dirigente que também é sócio de empresa no mesmo endereço, do mesmo ramo ou
+        # recém-aberta
+        enderecos = set(atributos.get("enderecos_normalizados") or [])
+        ramo = str(atributos.get("cnae_fiscal_principal") or "").strip()
+        primeira_vigencia = min(vigencias) if vigencias else None
+        ligadas = []
+        for dirigente, aresta in dirigentes:
+            # Sem os seis dígitos do CPF, "mesma pessoa" em duas empresas não se sustenta.
+            if not _identidade_parcial(dirigente)[0]:
+                continue
+            for outra_id, aresta_outra in empresas_do_socio.get(dirigente.id, []):
+                outra = ctx.entidades.get(outra_id)
+                if outra is None or outra_id == entidade_id:
+                    continue
+                motivos = []
+                if enderecos & set(_atr(outra).get("enderecos_normalizados") or []):
+                    motivos.append("mesmo endereço da entidade")
+                if ramo and ramo == str(_atr(outra).get("cnae_fiscal_principal") or "").strip():
+                    motivos.append(f"mesmo CNAE principal ({ramo})")
+                abertura = _inicio(outra)
+                if (
+                    abertura is not None
+                    and primeira_vigencia is not None
+                    and (primeira_vigencia - abertura).days < dias_minimos
+                ):
+                    motivos.append(
+                        f"aberta em {formatar_data(abertura.isoformat())}, menos de "
+                        f"{dias_minimos} dias antes da primeira vigência"
+                    )
+                if motivos:
+                    ligadas.append((dirigente, aresta, outra, aresta_outra, motivos))
+        if ligadas:
+            sinais["d"] = "tem dirigente que também é sócio de empresa ligada: " + _lista(
+                [
+                    f"{d.rotulo} ({_identidade_parcial(d)[0]}) em {o.rotulo} (CNPJ básico "
+                    f"{o.identificador}; {', '.join(m)})"
+                    for d, _, o, _, m in ligadas
+                ]
+            )
+            for dirigente, aresta, outra, aresta_outra, _ in ligadas[:MAX_ITENS_NO_MOTIVO]:
+                entidades += [dirigente.id, outra.id]
+                evidencias.append(_evidencia_socio(ctx, dirigente, aresta, entidade))
+                evidencias.append(_evidencia_socio(ctx, dirigente, aresta_outra, outra))
+
+        if not sinais:
+            return None
+        convenios_texto = _lista(
+            [
+                f"{c.identificador} ({formatar_moeda(_atr(c).get('valor'))}, vigência a partir de "
+                f"{formatar_data(_atr(c).get('data_inicio_vigencia'))}, concedente "
+                f"{_atr(c).get('orgao_nome') or 'não informado'})"
+                for c in lista
+            ]
+        )
+        evidencias = [
+            ctx.evidencia(
+                c.captura_id,
+                f"Convênio {c.identificador} de {entidade.rotulo}: vigência a partir de "
+                f"{formatar_data(_atr(c).get('data_inicio_vigencia'))}, valor "
+                f"{formatar_moeda(_atr(c).get('valor'))} (Portal da Transparência, convênios)",
+            )
+            for c in lista[:MAX_ITENS_NO_MOTIVO]
+        ] + evidencias
+        pessoas = bool({"c", "d"} & set(sinais))
+        motivo = (
+            f"A entidade sem fins lucrativos {entidade.rotulo} (CNPJ básico "
+            f"{entidade.identificador}, natureza jurídica {natureza}) é convenente em "
+            f"{len(lista)} convênio(s) federal(is): {convenios_texto}. Sinais encontrados: "
+            + "; ".join(f"({letra}) {texto}" for letra, texto in sorted(sinais.items()))
+            + ". Pode indicar entidade de fachada ou desvio por convênio, mas entidades regulares "
+            "também são novas ou têm dirigentes com atuação pública. O repasse da entidade a "
+            "empresas é dado bancário e não é visto aqui. "
+            + (AVISO_PESSOA_PROVAVEL + " " if pessoas else "")
+            + AVISO_PISTA
+        )
+        return AlertaDetectado(
+            tipologia="L16",
+            titulo=(
+                f"Entidade convenente com {len(sinais)} sinal(is) "
+                f"({', '.join(sorted(sinais))}): {entidade.rotulo}"
+            ),
+            motivo=motivo,
+            entidades=list(dict.fromkeys(entidades)),
+            evidencias=evidencias[: MAX_ITENS_NO_MOTIVO * 3],
+            parametros={
+                "l16_dias_minimos": dias_minimos,
+                "natureza_juridica": natureza,
+                "convenios": len(lista),
+                "sinais": sorted(sinais),
+                "identidade_confirmada": False if pessoas else None,
+            },
+        )
+
+    return _por_item("L16", sorted(convenios), regra)
+
+
 TIPOLOGIAS_LAVAGEM = {
     "L1": tipologia_l1,
     "L3": tipologia_l3,
     "L4": tipologia_l4,
     "L5": tipologia_l5,
+    "L6": tipologia_l6,
     "L7": tipologia_l7,
     "L8": tipologia_l8,
     "L10": tipologia_l10,
     "L14": tipologia_l14,
     "L15": tipologia_l15,
+    "L16": tipologia_l16,
 }
