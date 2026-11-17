@@ -1,0 +1,11 @@
+.venv
+.git
+dados
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+.env
+.env.*
+PROGRESSO.md
+dados-reais

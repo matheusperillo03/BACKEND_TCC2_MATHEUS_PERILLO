@@ -1,0 +1,22 @@
+# Arquivo opcional, para o PILOTO COM DADOS PÚBLICOS REAIS: monta a pasta ./dados-reais do host
+# (fora do git e fora da imagem; ver .gitignore e .dockerignore) dentro do contêiner da API, só
+# para leitura, e aponta para ela as raízes de ingestão dos conectores de arquivo.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dados-reais.yml up -d --build api
+#
+# Estrutura esperada em ./dados-reais (crie só as pastas que for usar):
+#   cnpj/<recorte>/      recorte do CNPJ gerado por scripts/recortar_cnpj.py
+#   tse/<pasta>/         consulta_cand_*.csv e receitas_candidatos_*.csv (ou ZIP) de uma UF
+#   editais/<pasta>/     editais em .pdf (com camada de texto) ou .txt
+# Na tela de coleta, "diretório" é o nome da subpasta (por exemplo, "recorte-caso1").
+#
+# Sem este arquivo, as raízes continuam nas fixtures sintéticas da imagem. As capturas feitas a
+# partir desta pasta NÃO são marcadas como sintéticas (não há o arquivo-marcador SINTETICO).
+services:
+  api:
+    environment:
+      CNPJ_DIR_BASE: /dados-reais/cnpj
+      TSE_DIR_BASE: /dados-reais/tse
+      EDITAIS_DIR_BASE: /dados-reais/editais
+    volumes:
+      - ./dados-reais:/dados-reais:ro

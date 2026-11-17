@@ -1,0 +1,142 @@
+name: osint-tcc
+
+# Segredos obrigatórios, sem valor padrão (defina no arquivo .env; ver .env.example):
+#   AUDITORIA_CHAVE_HMAC, CUSTODIA_CHAVE, POSTGRES_PASSWORD e POSTGRES_APP_PASSWORD.
+# Sem eles o `docker compose up` para com uma mensagem explicando o que falta.
+# Use senhas hexadecimais (`openssl rand -hex 24`): elas entram na URL de conexão.
+#
+# O PostgreSQL não é publicado no host. Para acessá-lo de fora (psql, depuração), habilite a
+# porta de propósito com o arquivo extra:
+#   docker compose -f docker-compose.yml -f docker-compose.postgres-porta.yml up -d
+
+x-seguranca: &seguranca
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  api:
+    build: .
+    container_name: osint-tcc-api
+    restart: unless-stopped
+    <<: *seguranca
+    mem_limit: 1g
+    ports:
+      - "127.0.0.1:8100:8000"
+    environment:
+      # Papel da aplicação: não é dono das tabelas nem dos gatilhos da auditoria.
+      DATABASE_URL: postgresql+psycopg://osint_app:${POSTGRES_APP_PASSWORD:?defina POSTGRES_APP_PASSWORD no .env (senha do papel da aplicacao)}@postgres:5432/osint
+      DB_CRIAR_ESQUEMA: "0"
+      DADOS_DIR: /app/dados
+      AUDITORIA_CHAVE_HMAC: ${AUDITORIA_CHAVE_HMAC:?defina AUDITORIA_CHAVE_HMAC no .env (openssl rand -hex 32)}
+      # Chave mestra da criptografia em repouso (capturas e segredos de TOTP); fica fora do banco.
+      CUSTODIA_CHAVE: ${CUSTODIA_CHAVE:?defina CUSTODIA_CHAVE no .env (openssl rand -hex 32; diferente da AUDITORIA_CHAVE_HMAC)}
+      CUSTODIA_CHAVES_ANTERIORES: ${CUSTODIA_CHAVES_ANTERIORES:-}
+      # Tokens fixos: so com MODO_DEV=1. O acesso normal e por usuario real (senha + MFA):
+      #   docker compose exec api python -m buscador.usuarios criar <usuario> admin
+      MODO_DEV: ${MODO_DEV:-0}
+      TOKENS_DEV: ${TOKENS_DEV:-}
+      MFA_PERFIS_OBRIGATORIOS: ${MFA_PERFIS_OBRIGATORIOS:-analista,delegado,admin}
+      SESSAO_DURACAO_MINUTOS: ${SESSAO_DURACAO_MINUTOS:-480}
+      SESSAO_INATIVIDADE_MINUTOS: ${SESSAO_INATIVIDADE_MINUTOS:-30}
+      LOGIN_MAX_FALHAS: ${LOGIN_MAX_FALHAS:-5}
+      LOGIN_BLOQUEIO_MINUTOS: ${LOGIN_BLOQUEIO_MINUTOS:-15}
+      GRAFO_MAX_NOS: ${GRAFO_MAX_NOS:-20000}
+      # Extracao por IA local: desligada por padrao; so servidor local (ver README).
+      IA_EXTRACAO_ATIVA: ${IA_EXTRACAO_ATIVA:-0}
+      IA_PROVEDOR: ${IA_PROVEDOR:-ollama}
+      IA_OLLAMA_URL: ${IA_OLLAMA_URL:-http://127.0.0.1:11434}
+      IA_MODELO: ${IA_MODELO:-}
+      IA_HOSTS_LOCAIS: ${IA_HOSTS_LOCAIS:-}
+      CORS_ORIGENS: ${CORS_ORIGENS:-http://localhost:5190,http://localhost:8090}
+      CNPJ_DIR_BASE: ${CNPJ_DIR_BASE:-/app/tests/fixtures}
+      PNCP_URL_BASE: ${PNCP_URL_BASE:-https://pncp.gov.br/api/consulta}
+      PNCP_MAX_PAGINAS: ${PNCP_MAX_PAGINAS:-20}
+      PNCP_MAX_DIAS_PERIODO: ${PNCP_MAX_DIAS_PERIODO:-366}
+      PORTAL_TRANSPARENCIA_CHAVE: ${PORTAL_TRANSPARENCIA_CHAVE:-}
+      PORTAL_TRANSPARENCIA_REQUISICOES_POR_MINUTO: ${PORTAL_TRANSPARENCIA_REQUISICOES_POR_MINUTO:-300}
+      PNCP_INTEGRACAO_URL_BASE: ${PNCP_INTEGRACAO_URL_BASE:-https://pncp.gov.br/api/pncp}
+      PNCP_TERMOS_REQUISICOES_POR_MINUTO: ${PNCP_TERMOS_REQUISICOES_POR_MINUTO:-60}
+      # Raízes de ingestão do TSE e dos editais: por padrão, as fixtures sintéticas da imagem.
+      TSE_DIR_BASE: ${TSE_DIR_BASE:-/app/tests/fixtures/h2}
+      EDITAIS_DIR_BASE: ${EDITAIS_DIR_BASE:-/app/tests/fixtures/h2}
+      # Limites defensivos da leitura de PDF (edital_arquivo, rota de texto, T10 e IA).
+      EDITAIS_PDF_MAX_BYTES: ${EDITAIS_PDF_MAX_BYTES:-52428800}
+      EDITAIS_PDF_MAX_PAGINAS: ${EDITAIS_PDF_MAX_PAGINAS:-300}
+      EDITAIS_PDF_TEMPO_SEGUNDOS: ${EDITAIS_PDF_TEMPO_SEGUNDOS:-60}
+      T5_LIMITES_DISPENSA: ${T5_LIMITES_DISPENSA:-}
+      T5_MINIMO_CONTRATACOES: ${T5_MINIMO_CONTRATACOES:-2}
+      T5_CRITERIO_NATUREZA: ${T5_CRITERIO_NATUREZA:-fornecedor_e_categoria}
+      T8_PERCENTUAL_LIMITE: ${T8_PERCENTUAL_LIMITE:-25}
+      T8_PERCENTUAL_LIMITE_REFORMA: ${T8_PERCENTUAL_LIMITE_REFORMA:-50}
+      T10_EXPRESSOES_EXTRAS: ${T10_EXPRESSOES_EXTRAS:-}
+      MONITORAMENTO_AGENDADOR_ATIVO: ${MONITORAMENTO_AGENDADOR_ATIVO:-1}
+      MONITORAMENTO_INTERVALO_SEGUNDOS: ${MONITORAMENTO_INTERVALO_SEGUNDOS:-60}
+      T1_DIAS_MINIMOS: ${T1_DIAS_MINIMOS:-180}
+      T2_MINIMO_EMPRESAS: ${T2_MINIMO_EMPRESAS:-3}
+      T3_RAZAO_MINIMA: ${T3_RAZAO_MINIMA:-10}
+    volumes:
+      - osint-tcc-capturas:/app/dados
+    depends_on:
+      migracao:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Passo único, com a credencial do papel DONO: cria tabelas e gatilhos da auditoria (inclusive
+  # o de TRUNCATE) e concede ao papel da aplicação só o necessário. A API nunca recebe esta senha.
+  migracao:
+    build: .
+    container_name: osint-tcc-migracao
+    <<: *seguranca
+    command: ["python", "-m", "buscador.migrar"]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql+psycopg://osint:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env (senha do papel dono do banco)}@postgres:5432/osint
+      DB_PAPEL_APP: osint_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Front-end: repositório irmão FRONTEND_TCC2_MATHEUS_PERILLO (mesma pasta-mãe).
+  # O nginx serve a aplicação e repassa /api/ para o serviço api; o navegador só fala com ele.
+  frontend:
+    build:
+      context: ../FRONTEND_TCC2_MATHEUS_PERILLO
+      args:
+        VITE_API_URL: /api
+        VITE_MOCK: "0"
+    container_name: osint-tcc-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: osint-tcc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: osint
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env (senha do papel dono do banco)}
+      POSTGRES_DB: osint
+      # Lidas por docker/postgres-init/01-papel-aplicacao.sh na criação do volume.
+      DB_PAPEL_APP: osint_app
+      DB_SENHA_APP: ${POSTGRES_APP_PASSWORD:?defina POSTGRES_APP_PASSWORD no .env (senha do papel da aplicacao)}
+    # Sem "ports": o banco só é alcançado pela rede interna do Compose.
+    volumes:
+      - osint-tcc-postgres:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U osint -d osint"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  osint-tcc-capturas:
+  osint-tcc-postgres:
