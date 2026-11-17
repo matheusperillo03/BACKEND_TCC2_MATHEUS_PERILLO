@@ -258,6 +258,8 @@ class TipologiaSaida(BaseModel):
     grupo: str = "contratacao"
     # Sinal fraco: sozinho não indica nada; só pesa no alerta de combinação.
     sinal_fraco: bool = False
+    # Peso da tipologia no alerta de combinação.
+    peso: float = 1.0
 
 
 class MonitoramentoEntrada(BaseModel):
@@ -418,11 +420,15 @@ class ParametrosTipologias(BaseModel):
     l15_minimo_cnaes: int | None = Field(default=None, ge=2, le=1_000)
     l15_minimo_categorias: int | None = Field(default=None, ge=2, le=100)
     l16_dias_minimos: int | None = Field(default=None, ge=0, le=36_500)
+    # Alerta de combinação.
+    comb_minimo_tipologias: int | None = Field(default=None, ge=2, le=30)
+    comb_peso_minimo: float | None = Field(default=None, gt=0, le=100)
 
 
 CodigoTipologia = Literal[
     "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10",
     "L1", "L3", "L4", "L5", "L6", "L7", "L8", "L10", "L14", "L15", "L16",
+    "COMB",
 ]  # fmt: skip
 
 
@@ -476,6 +482,7 @@ class AlertaSaida(BaseModel):
     politica_erro: str
     grupo: str = "contratacao"
     sinal_fraco: bool = False
+    peso: float = 1.0
     # RF12 (H12): situação, decisão em vigor e histórico completo das decisões.
     situacao: Literal["pendente", "confirmado", "descartado"]
     decisao: DecisaoSaida | None

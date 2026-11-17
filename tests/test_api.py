@@ -284,15 +284,17 @@ def test_executar_e_listar_alertas(cliente, caso_carregado):
     assert r.status_code == 200, r.text
     alertas = r.json()
     # As fixtures têm duas empresas com sócio estrangeiro (L5) e duas microempresas com
-    # contratos acima do limite de receita do porte (L6).
+    # contratos acima do limite de receita do porte (L6). Três empresas acumulam tipologias
+    # distintas e ganham o alerta de combinação (COMB).
     assert sorted(a["tipologia"] for a in alertas) == [
+        *["COMB", "COMB", "COMB"],
         *["L5", "L5", "L6", "L6"],
         *["T1", "T1", "T2", "T3", "T3", "T4", "T4"],
     ]
-    # T1 é a primeira tipologia com limiar; a lista vem por severidade, então T4 abre a fila.
-    assert alertas[0]["tipologia"] == "T4"
+    # A lista vem por severidade: a combinação (alta) abre a fila, seguida da T4 (alta).
+    assert [x["tipologia"] for x in alertas[:5]] == ["COMB", "COMB", "COMB", "T4", "T4"]
     alertas_por_tipologia = {x["tipologia"]: x for x in alertas}
-    a = alertas[0]
+    a = alertas[3]
     assert set(a) >= {
         "id",
         "tipologia",
@@ -456,7 +458,7 @@ def test_relatorio_json_e_markdown(cliente, caso_carregado):
         "auditoria",
         "sugestoes_resolucao",
     }
-    assert d["resumo"]["alertas"] == 11 and d["resumo"]["capturas"] == 5
+    assert d["resumo"]["alertas"] == 14 and d["resumo"]["capturas"] == 5
     assert d["custodia_integra"] is True and all(
         len(c["sha256_registrado"]) == 64 for c in d["custodia"]
     )

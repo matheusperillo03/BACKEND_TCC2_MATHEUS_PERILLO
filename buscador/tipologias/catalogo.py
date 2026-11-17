@@ -205,6 +205,16 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
         ["cnpj_arquivo", "portal_transparencia (convenios, cepim, servidores)"],
         ["l16_dias_minimos", "l16_naturezas_sem_fins_lucrativos"],
     ),
+    "COMB": (
+        "H48",
+        "Empresa ou pessoa com alertas ativos e não descartados de K ou mais tipologias "
+        "distintas e soma de pesos igual ou maior que P. Tipologias do mesmo fato contam uma "
+        "vez (L1 com T2) e composições não somam de novo (L8 é T1 com T7).",
+        "Velasco et al. (2021), seção 3.3 ('the risk of fraud increases when combinations of "
+        "these risk patterns are identified'). Pesos e mínimos: decisão do autor.",
+        ["alertas das demais tipologias"],
+        ["comb_minimo_tipologias", "comb_peso_minimo", "comb_pesos"],
+    ),
 }
 
 _DESCRICAO_PARAMETROS = {
@@ -245,6 +255,10 @@ _DESCRICAO_PARAMETROS = {
     "convênio.",
     "l16_naturezas_sem_fins_lucrativos": "Naturezas jurídicas tratadas como sem fins lucrativos "
     "(3069 Fundação Privada, 3301 Organização Social, 3999 Associação Privada).",
+    "comb_minimo_tipologias": "Número mínimo de tipologias distintas na mesma entidade.",
+    "comb_peso_minimo": "Soma mínima dos pesos das tipologias contadas.",
+    "comb_pesos": "Peso de cada tipologia na combinação (sinais fracos pesam menos; composição "
+    "pesa zero).",
     "qualificacoes_administracao": "Códigos de qualificação de sócio que contam como "
     "administração (tabela de domínio Qualificações do CNPJ).",
     "t10_expressoes_extras": "Expressões regulares além das do código "
@@ -269,6 +283,7 @@ def catalogo(parametros: dict) -> list[dict]:
                 "politica_erro": politica.politica_erro,
                 "grupo": politica.grupo,
                 "sinal_fraco": politica.sinal_fraco,
+                "peso": float((parametros.get("comb_pesos") or {}).get(codigo, 0.0)),
                 "regra": regra,
                 "base": base,
                 "fontes": fontes,

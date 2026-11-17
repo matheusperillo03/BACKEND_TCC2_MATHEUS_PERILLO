@@ -92,7 +92,8 @@ def _decisao_para_dict(d: AlertaDecisao) -> dict:
     }
 
 
-def _alerta_para_dict(a: Alerta) -> dict:
+def _alerta_para_dict(a: Alerta, pesos: dict | None = None) -> dict:
+    """``pesos``: peso de cada tipologia no alerta de combinação (da configuração)."""
     politica = tipologias.politica(a.tipologia)
     decisoes = [_decisao_para_dict(d) for d in a.decisoes]
     return {
@@ -110,6 +111,7 @@ def _alerta_para_dict(a: Alerta) -> dict:
         "politica_erro": politica.politica_erro if politica else "",
         "grupo": politica.grupo if politica else "contratacao",
         "sinal_fraco": politica.sinal_fraco if politica else False,
+        "peso": float((pesos or {}).get(a.tipologia, 0.0)),
         "situacao": a.situacao or "pendente",
         # A decisão em vigor é a última do histórico; as anteriores continuam em ``decisoes``.
         "decisao": decisoes[-1] if decisoes else None,
@@ -907,7 +909,8 @@ def executar_alertas(
         },
     )
     ctx.concluir()
-    return [_alerta_para_dict(a) for a in alertas]
+    pesos = ctx.config.parametros_tipologias()["comb_pesos"]
+    return [_alerta_para_dict(a, pesos) for a in alertas]
 
 
 @roteador.get("/{caso_id}/alertas", response_model=list[esquemas.AlertaSaida])
@@ -924,7 +927,8 @@ def listar_alertas(caso_id: str, ctx: Contexto = Depends(contexto)):
         {"alertas": len(alertas), "pendentes": sum(a.situacao == "pendente" for a in alertas)},
     )
     ctx.concluir()
-    return [_alerta_para_dict(a) for a in alertas]
+    pesos = ctx.config.parametros_tipologias()["comb_pesos"]
+    return [_alerta_para_dict(a, pesos) for a in alertas]
 
 
 @roteador.post("/{caso_id}/alertas/{alerta_id}/decisao", response_model=esquemas.AlertaSaida)
@@ -972,7 +976,7 @@ def decidir_alerta(
         },
     )
     ctx.concluir()
-    return _alerta_para_dict(alerta)
+    return _alerta_para_dict(alerta, ctx.config.parametros_tipologias()["comb_pesos"])
 
 
 @roteador.get(

@@ -888,7 +888,7 @@ def test_h37_anotacoes_em_entidade_e_alerta_com_autor_data_e_auditoria(
         headers=H_CARLOS,
     )
     assert r.status_code == 201 and r.json()["autor"] == "carlos"
-    assert r.json()["alvo_rotulo"].startswith("[T")
+    assert r.json()["alvo_rotulo"].startswith("[COMB] ")
 
     todas = cliente.get(f"/casos/{caso_id}/anotacoes", headers=H_ROOT).json()
     assert {(a["alvo_tipo"], a["autor"]) for a in todas} == {
