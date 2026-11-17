@@ -1,0 +1,27 @@
+{
+  "90000007000104": [
+    {
+      "id": 900002,
+      "dataInicioSancao": "01/01/2020",
+      "dataFimSancao": "01/01/2021",
+      "tipoSancao": {
+        "descricaoResumida": "Multa sintética (Lei 12.846)",
+        "descricaoPortal": "Multa sintética (Lei 12.846)"
+      },
+      "orgaoSancionador": {
+        "nome": "ORGAO SANCIONADOR SINTETICO",
+        "siglaUf": "GO"
+      },
+      "sancionado": {
+        "nome": "ETA TRANSPORTES SINTETICA LTDA",
+        "codigoFormatado": "90.000.007/0001-04"
+      },
+      "pessoa": {
+        "cnpjFormatado": "90.000.007/0001-04",
+        "razaoSocialReceita": "ETA TRANSPORTES SINTETICA LTDA",
+        "tipo": "J"
+      },
+      "numeroProcesso": "SINT-900002/2025"
+    }
+  ]
+}

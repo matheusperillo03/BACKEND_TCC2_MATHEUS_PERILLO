@@ -1,0 +1,402 @@
+{
+  "medido_em": "2026-11-16T22:36:08Z",
+  "ambiente": {
+    "postgresql": "16.14",
+    "python": "3.12.13",
+    "sistema": "Darwin 25.6.0 (arm64)",
+    "processador": "arm"
+  },
+  "semente": 20261116,
+  "resultados": [
+    {
+      "grafo": {
+        "nos": 5000,
+        "arestas": 10000,
+        "carga_segundos": 0.43,
+        "indices_de_arestas": [
+          "arestas_pkey",
+          "ix_aresta_caso_tipo",
+          "ix_arestas_caso_id",
+          "ix_arestas_destino_id",
+          "ix_arestas_origem_id",
+          "uq_aresta"
+        ],
+        "entidades_total_bytes": 2162688,
+        "arestas_tabela_bytes": 2228224,
+        "arestas_indices_bytes": 3694592,
+        "arestas_total_bytes": 5955584
+      },
+      "medidas": [
+        {
+          "estrategia": "sql_niveis",
+          "vizinhanca": {
+            "1": {
+              "consultas": 20,
+              "mediana_ms": 1.5,
+              "p95_ms": 47.4,
+              "maximo_ms": 47.4,
+              "nos_resposta_mediana": 4,
+              "nos_resposta_maximo": 52
+            },
+            "2": {
+              "consultas": 20,
+              "mediana_ms": 2.4,
+              "p95_ms": 7.0,
+              "maximo_ms": 7.0,
+              "nos_resposta_mediana": 49,
+              "nos_resposta_maximo": 238
+            },
+            "3": {
+              "consultas": 20,
+              "mediana_ms": 6.5,
+              "p95_ms": 33.3,
+              "maximo_ms": 33.3,
+              "nos_resposta_mediana": 248,
+              "nos_resposta_maximo": 1373
+            }
+          },
+          "caminho": {
+            "consultas": 20,
+            "mediana_ms": 3.1,
+            "p95_ms": 4.8,
+            "maximo_ms": 4.8,
+            "nos_resposta_mediana": 6,
+            "nos_resposta_maximo": 8,
+            "encontrados": 19
+          },
+          "pico_memoria_mib": 80.1
+        },
+        {
+          "estrategia": "sql_recursiva",
+          "vizinhanca": {
+            "1": {
+              "consultas": 20,
+              "mediana_ms": 3.8,
+              "p95_ms": 45.6,
+              "maximo_ms": 45.6,
+              "nos_resposta_mediana": 4,
+              "nos_resposta_maximo": 52
+            },
+            "2": {
+              "consultas": 20,
+              "mediana_ms": 5.0,
+              "p95_ms": 23.5,
+              "maximo_ms": 23.5,
+              "nos_resposta_mediana": 49,
+              "nos_resposta_maximo": 238
+            },
+            "3": {
+              "consultas": 20,
+              "mediana_ms": 9.9,
+              "p95_ms": 36.6,
+              "maximo_ms": 36.6,
+              "nos_resposta_mediana": 248,
+              "nos_resposta_maximo": 1373
+            }
+          },
+          "caminho": null,
+          "pico_memoria_mib": 80.1
+        },
+        {
+          "estrategia": "networkx",
+          "vizinhanca": {
+            "1": {
+              "consultas": 3,
+              "mediana_ms": 152.4,
+              "p95_ms": 154.4,
+              "maximo_ms": 154.4,
+              "nos_resposta_mediana": 4,
+              "nos_resposta_maximo": 43
+            },
+            "2": {
+              "consultas": 3,
+              "mediana_ms": 145.4,
+              "p95_ms": 148.1,
+              "maximo_ms": 148.1,
+              "nos_resposta_mediana": 65,
+              "nos_resposta_maximo": 213
+            },
+            "3": {
+              "consultas": 3,
+              "mediana_ms": 140.9,
+              "p95_ms": 162.1,
+              "maximo_ms": 162.1,
+              "nos_resposta_mediana": 260,
+              "nos_resposta_maximo": 1190
+            }
+          },
+          "caminho": {
+            "consultas": 3,
+            "mediana_ms": 104.9,
+            "p95_ms": 111.1,
+            "maximo_ms": 111.1,
+            "nos_resposta_mediana": 6,
+            "nos_resposta_maximo": 7,
+            "encontrados": 3
+          },
+          "pico_memoria_mib": 105.8
+        }
+      ]
+    },
+    {
+      "grafo": {
+        "nos": 50000,
+        "arestas": 100000,
+        "carga_segundos": 4.59,
+        "indices_de_arestas": [
+          "arestas_pkey",
+          "ix_aresta_caso_tipo",
+          "ix_arestas_caso_id",
+          "ix_arestas_destino_id",
+          "ix_arestas_origem_id",
+          "uq_aresta"
+        ],
+        "entidades_total_bytes": 18694144,
+        "arestas_tabela_bytes": 21626880,
+        "arestas_indices_bytes": 35463168,
+        "arestas_total_bytes": 57122816
+      },
+      "medidas": [
+        {
+          "estrategia": "sql_niveis",
+          "vizinhanca": {
+            "1": {
+              "consultas": 20,
+              "mediana_ms": 1.6,
+              "p95_ms": 26.6,
+              "maximo_ms": 26.6,
+              "nos_resposta_mediana": 4,
+              "nos_resposta_maximo": 58
+            },
+            "2": {
+              "consultas": 20,
+              "mediana_ms": 2.4,
+              "p95_ms": 6.3,
+              "maximo_ms": 6.3,
+              "nos_resposta_mediana": 46,
+              "nos_resposta_maximo": 304
+            },
+            "3": {
+              "consultas": 20,
+              "mediana_ms": 5.6,
+              "p95_ms": 32.6,
+              "maximo_ms": 32.6,
+              "nos_resposta_mediana": 231,
+              "nos_resposta_maximo": 2296
+            }
+          },
+          "caminho": {
+            "consultas": 20,
+            "mediana_ms": 4.6,
+            "p95_ms": 7.3,
+            "maximo_ms": 7.3,
+            "nos_resposta_mediana": 8,
+            "nos_resposta_maximo": 10,
+            "encontrados": 20
+          },
+          "pico_memoria_mib": 82.0
+        },
+        {
+          "estrategia": "sql_recursiva",
+          "vizinhanca": {
+            "1": {
+              "consultas": 20,
+              "mediana_ms": 27.1,
+              "p95_ms": 174.3,
+              "maximo_ms": 174.3,
+              "nos_resposta_mediana": 4,
+              "nos_resposta_maximo": 58
+            },
+            "2": {
+              "consultas": 20,
+              "mediana_ms": 45.0,
+              "p95_ms": 52.0,
+              "maximo_ms": 52.0,
+              "nos_resposta_mediana": 46,
+              "nos_resposta_maximo": 304
+            },
+            "3": {
+              "consultas": 20,
+              "mediana_ms": 70.0,
+              "p95_ms": 123.0,
+              "maximo_ms": 123.0,
+              "nos_resposta_mediana": 231,
+              "nos_resposta_maximo": 2296
+            }
+          },
+          "caminho": null,
+          "pico_memoria_mib": 82.0
+        },
+        {
+          "estrategia": "networkx",
+          "vizinhanca": {
+            "1": {
+              "consultas": 3,
+              "mediana_ms": 1711.1,
+              "p95_ms": 1726.9,
+              "maximo_ms": 1726.9,
+              "nos_resposta_mediana": 3,
+              "nos_resposta_maximo": 40
+            },
+            "2": {
+              "consultas": 3,
+              "mediana_ms": 1673.3,
+              "p95_ms": 1690.1,
+              "maximo_ms": 1690.1,
+              "nos_resposta_mediana": 7,
+              "nos_resposta_maximo": 203
+            },
+            "3": {
+              "consultas": 3,
+              "mediana_ms": 1671.0,
+              "p95_ms": 1770.9,
+              "maximo_ms": 1770.9,
+              "nos_resposta_mediana": 23,
+              "nos_resposta_maximo": 1482
+            }
+          },
+          "caminho": {
+            "consultas": 3,
+            "mediana_ms": 1197.6,
+            "p95_ms": 1242.7,
+            "maximo_ms": 1242.7,
+            "nos_resposta_mediana": 7,
+            "nos_resposta_maximo": 8,
+            "encontrados": 3
+          },
+          "pico_memoria_mib": 368.6
+        }
+      ]
+    },
+    {
+      "grafo": {
+        "nos": 500000,
+        "arestas": 1000000,
+        "carga_segundos": 57.33,
+        "indices_de_arestas": [
+          "arestas_pkey",
+          "ix_aresta_caso_tipo",
+          "ix_arestas_caso_id",
+          "ix_arestas_destino_id",
+          "ix_arestas_origem_id",
+          "uq_aresta"
+        ],
+        "entidades_total_bytes": 187973632,
+        "arestas_tabela_bytes": 215613440,
+        "arestas_indices_bytes": 349265920,
+        "arestas_total_bytes": 564961280
+      },
+      "medidas": [
+        {
+          "estrategia": "sql_niveis",
+          "vizinhanca": {
+            "1": {
+              "consultas": 20,
+              "mediana_ms": 1.8,
+              "p95_ms": 105.6,
+              "maximo_ms": 105.6,
+              "nos_resposta_mediana": 5,
+              "nos_resposta_maximo": 55
+            },
+            "2": {
+              "consultas": 20,
+              "mediana_ms": 2.8,
+              "p95_ms": 12.5,
+              "maximo_ms": 12.5,
+              "nos_resposta_mediana": 27,
+              "nos_resposta_maximo": 282
+            },
+            "3": {
+              "consultas": 20,
+              "mediana_ms": 8.3,
+              "p95_ms": 90.0,
+              "maximo_ms": 90.0,
+              "nos_resposta_mediana": 223,
+              "nos_resposta_maximo": 1981
+            }
+          },
+          "caminho": {
+            "consultas": 20,
+            "mediana_ms": 11.3,
+            "p95_ms": 23.7,
+            "maximo_ms": 23.7,
+            "nos_resposta_mediana": 8,
+            "nos_resposta_maximo": 11,
+            "encontrados": 18
+          },
+          "pico_memoria_mib": 82.5
+        },
+        {
+          "estrategia": "sql_recursiva",
+          "vizinhanca": {
+            "1": {
+              "consultas": 20,
+              "mediana_ms": 251.1,
+              "p95_ms": 417.7,
+              "maximo_ms": 417.7,
+              "nos_resposta_mediana": 5,
+              "nos_resposta_maximo": 55
+            },
+            "2": {
+              "consultas": 20,
+              "mediana_ms": 450.7,
+              "p95_ms": 511.5,
+              "maximo_ms": 511.5,
+              "nos_resposta_mediana": 27,
+              "nos_resposta_maximo": 282
+            },
+            "3": {
+              "consultas": 20,
+              "mediana_ms": 666.8,
+              "p95_ms": 1036.6,
+              "maximo_ms": 1036.6,
+              "nos_resposta_mediana": 223,
+              "nos_resposta_maximo": 1981
+            }
+          },
+          "caminho": null,
+          "pico_memoria_mib": 76.1
+        },
+        {
+          "estrategia": "networkx",
+          "vizinhanca": {
+            "1": {
+              "consultas": 3,
+              "mediana_ms": 19954.9,
+              "p95_ms": 20188.3,
+              "maximo_ms": 20188.3,
+              "nos_resposta_mediana": 7,
+              "nos_resposta_maximo": 42
+            },
+            "2": {
+              "consultas": 3,
+              "mediana_ms": 18779.7,
+              "p95_ms": 19183.5,
+              "maximo_ms": 19183.5,
+              "nos_resposta_mediana": 73,
+              "nos_resposta_maximo": 191
+            },
+            "3": {
+              "consultas": 3,
+              "mediana_ms": 18849.1,
+              "p95_ms": 19503.7,
+              "maximo_ms": 19503.7,
+              "nos_resposta_mediana": 368,
+              "nos_resposta_maximo": 1434
+            }
+          },
+          "caminho": {
+            "consultas": 3,
+            "mediana_ms": 13199.5,
+            "p95_ms": 13988.3,
+            "maximo_ms": 13988.3,
+            "nos_resposta_mediana": 9,
+            "nos_resposta_maximo": 10,
+            "encontrados": 3
+          },
+          "pico_memoria_mib": 2556.8
+        }
+      ]
+    }
+  ]
+}

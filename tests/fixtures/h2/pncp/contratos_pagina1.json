@@ -1,0 +1,479 @@
+{
+  "data": [
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000101/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 101,
+      "dataAtualizacao": "2026-02-10T10:00:00",
+      "processo": "00000.000101/2026-00",
+      "dataPublicacaoPncp": "2026-02-10T10:00:00",
+      "dataAtualizacaoGlobal": "2026-02-10T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "101/2026",
+      "categoriaProcesso": {
+        "id": 8,
+        "nome": "Serviços"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000004000162",
+      "nomeRazaoSocialFornecedor": "DELTA SERVICOS SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000101/2026",
+      "objetoContrato": "Serviço sintético de jardinagem, lote A",
+      "valorInicial": 30000.0,
+      "valorParcela": 30000.0,
+      "valorGlobal": 30000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-02-10",
+      "dataVigenciaInicio": "2026-02-10",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    },
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000102/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 102,
+      "dataAtualizacao": "2026-04-10T10:00:00",
+      "processo": "00000.000102/2026-00",
+      "dataPublicacaoPncp": "2026-04-10T10:00:00",
+      "dataAtualizacaoGlobal": "2026-04-10T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "102/2026",
+      "categoriaProcesso": {
+        "id": 8,
+        "nome": "Serviços"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000004000162",
+      "nomeRazaoSocialFornecedor": "DELTA SERVICOS SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000102/2026",
+      "objetoContrato": "Serviço sintético de jardinagem, lote B",
+      "valorInicial": 30000.0,
+      "valorParcela": 30000.0,
+      "valorGlobal": 30000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-04-10",
+      "dataVigenciaInicio": "2026-04-10",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    },
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000103/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 103,
+      "dataAtualizacao": "2026-06-10T10:00:00",
+      "processo": "00000.000103/2026-00",
+      "dataPublicacaoPncp": "2026-06-10T10:00:00",
+      "dataAtualizacaoGlobal": "2026-06-10T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "103/2026",
+      "categoriaProcesso": {
+        "id": 8,
+        "nome": "Serviços"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000004000162",
+      "nomeRazaoSocialFornecedor": "DELTA SERVICOS SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000103/2026",
+      "objetoContrato": "Serviço sintético de jardinagem, lote C",
+      "valorInicial": 30000.0,
+      "valorParcela": 30000.0,
+      "valorGlobal": 30000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-06-10",
+      "dataVigenciaInicio": "2026-06-10",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    },
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000104/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 104,
+      "dataAtualizacao": "2026-03-05T10:00:00",
+      "processo": "00000.000104/2026-00",
+      "dataPublicacaoPncp": "2026-03-05T10:00:00",
+      "dataAtualizacaoGlobal": "2026-03-05T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "104/2026",
+      "categoriaProcesso": {
+        "id": 2,
+        "nome": "Compras"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000005000107",
+      "nomeRazaoSocialFornecedor": "EPSILON COMERCIO SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000104/2026",
+      "objetoContrato": "Aquisição sintética de material de expediente",
+      "valorInicial": 20000.0,
+      "valorParcela": 20000.0,
+      "valorGlobal": 20000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-03-05",
+      "dataVigenciaInicio": "2026-03-05",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    },
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000105/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 105,
+      "dataAtualizacao": "2026-07-05T10:00:00",
+      "processo": "00000.000105/2026-00",
+      "dataPublicacaoPncp": "2026-07-05T10:00:00",
+      "dataAtualizacaoGlobal": "2026-07-05T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "105/2026",
+      "categoriaProcesso": {
+        "id": 2,
+        "nome": "Compras"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000005000107",
+      "nomeRazaoSocialFornecedor": "EPSILON COMERCIO SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000105/2026",
+      "objetoContrato": "Aquisição sintética de material de limpeza",
+      "valorInicial": 20000.0,
+      "valorParcela": 20000.0,
+      "valorGlobal": 20000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-07-05",
+      "dataVigenciaInicio": "2026-07-05",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    },
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000106/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 106,
+      "dataAtualizacao": "2026-02-20T10:00:00",
+      "processo": "00000.000106/2026-00",
+      "dataPublicacaoPncp": "2026-02-20T10:00:00",
+      "dataAtualizacaoGlobal": "2026-02-20T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "106/2026",
+      "categoriaProcesso": {
+        "id": 7,
+        "nome": "Obras"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000001000129",
+      "nomeRazaoSocialFornecedor": "ALFA CONSTRUCOES SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000106/2026",
+      "objetoContrato": "Obra sintética de calçada, trecho 1",
+      "valorInicial": 50000.0,
+      "valorParcela": 50000.0,
+      "valorGlobal": 50000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-02-20",
+      "dataVigenciaInicio": "2026-02-20",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    },
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000107/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 107,
+      "dataAtualizacao": "2026-05-20T10:00:00",
+      "processo": "00000.000107/2026-00",
+      "dataPublicacaoPncp": "2026-05-20T10:00:00",
+      "dataAtualizacaoGlobal": "2026-05-20T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "107/2026",
+      "categoriaProcesso": {
+        "id": 7,
+        "nome": "Obras"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000001000129",
+      "nomeRazaoSocialFornecedor": "ALFA CONSTRUCOES SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000107/2026",
+      "objetoContrato": "Obra sintética de calçada, trecho 2",
+      "valorInicial": 50000.0,
+      "valorParcela": 50000.0,
+      "valorGlobal": 50000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-05-20",
+      "dataVigenciaInicio": "2026-05-20",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    },
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000108/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 108,
+      "dataAtualizacao": "2026-03-01T10:00:00",
+      "processo": "00000.000108/2026-00",
+      "dataPublicacaoPncp": "2026-03-01T10:00:00",
+      "dataAtualizacaoGlobal": "2026-03-01T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "108/2026",
+      "categoriaProcesso": {
+        "id": 8,
+        "nome": "Serviços"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000006000151",
+      "nomeRazaoSocialFornecedor": "ZETA CONSULTORIA SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000108/2026",
+      "objetoContrato": "Consultoria sintética em gestão",
+      "valorInicial": 100000.0,
+      "valorParcela": 100000.0,
+      "valorGlobal": 100000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-03-01",
+      "dataVigenciaInicio": "2026-03-01",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    },
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000109/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 109,
+      "dataAtualizacao": "2026-04-15T10:00:00",
+      "processo": "00000.000109/2026-00",
+      "dataPublicacaoPncp": "2026-04-15T10:00:00",
+      "dataAtualizacaoGlobal": "2026-04-15T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "109/2026",
+      "categoriaProcesso": {
+        "id": 7,
+        "nome": "Obras"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000007000104",
+      "nomeRazaoSocialFornecedor": "ETA TRANSPORTES SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000109/2026",
+      "objetoContrato": "Reforma de edifício sintético da sede",
+      "valorInicial": 200000.0,
+      "valorParcela": 200000.0,
+      "valorGlobal": 200000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-04-15",
+      "dataVigenciaInicio": "2026-04-15",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    },
+    {
+      "numeroControlePncpCompra": "90100003000190-1-000110/2026",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      },
+      "anoContrato": 2026,
+      "sequencialContrato": 110,
+      "dataAtualizacao": "2026-05-10T10:00:00",
+      "processo": "00000.000110/2026-00",
+      "dataPublicacaoPncp": "2026-05-10T10:00:00",
+      "dataAtualizacaoGlobal": "2026-05-10T10:00:00",
+      "unidadeOrgao": {
+        "ufNome": "Goiás",
+        "ufSigla": "GO",
+        "municipioNome": "Exemplopolis",
+        "codigoUnidade": "910001",
+        "nomeUnidade": "SECRETARIA SINTETICA DE ADMINISTRACAO",
+        "codigoIbge": "0000000"
+      },
+      "numeroParcelas": 1,
+      "numeroRetificacao": 0,
+      "tipoContrato": {
+        "id": 1,
+        "nome": "Contrato (termo inicial)"
+      },
+      "numeroContratoEmpenho": "110/2026",
+      "categoriaProcesso": {
+        "id": 8,
+        "nome": "Serviços"
+      },
+      "tipoPessoa": "PJ",
+      "niFornecedor": "90000012000109",
+      "nomeRazaoSocialFornecedor": "MU EVENTOS SINTETICA LTDA",
+      "numeroControlePNCP": "90100003000190-2-000110/2026",
+      "objetoContrato": "Organização sintética de eventos",
+      "valorInicial": 100000.0,
+      "valorParcela": 100000.0,
+      "valorGlobal": 100000.0,
+      "valorAcumulado": null,
+      "dataAssinatura": "2026-05-10",
+      "dataVigenciaInicio": "2026-05-10",
+      "dataVigenciaFim": "2027-12-31",
+      "usuarioNome": "Fixture sintética"
+    }
+  ],
+  "totalRegistros": 10,
+  "totalPaginas": 1,
+  "numeroPagina": 1,
+  "paginasRestantes": 0,
+  "empty": false
+}
