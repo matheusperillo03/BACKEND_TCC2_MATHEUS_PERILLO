@@ -1,0 +1,94 @@
+# Pipeline de integração do back-end (RNF11, H16).
+#
+# Barreira para código gerado por IA: nada entra sem lint, testes e análise estática de segurança.
+# Cada etapa é um comando que termina com código diferente de zero quando falha, e não há
+# `continue-on-error` nem `|| true`: se qualquer etapa falha, o job falha e o pipeline também.
+#
+# Equivalente local:
+#   uv sync --locked
+#   uv run ruff check . && uv run ruff format --check .
+#   uv run bandit -c pyproject.toml -r buscador scripts
+#   uv run pytest
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    name: Lint, segurança e testes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # PostgreSQL descartável do próprio job, para os testes que só rodam com banco real
+    # (gatilhos, privilégios do papel da aplicação e evolução do esquema). As senhas abaixo não
+    # são segredos: valem só para este contêiner, que nasce e morre com o job.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: osint
+          POSTGRES_PASSWORD: ci-dono-descartavel
+          POSTGRES_DB: osint
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U osint -d osint"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      TEST_POSTGRES_URL: postgresql+psycopg://osint:ci-dono-descartavel@localhost:5432/osint
+      TEST_POSTGRES_URL_APP: postgresql+psycopg://osint_app:ci-app-descartavel@localhost:5432/osint
+      TEST_POSTGRES_PAPEL_APP: osint_app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar o uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Instalar as dependências (versões travadas no uv.lock)
+        run: uv sync --locked
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Formatação (ruff format)
+        run: uv run ruff format --check .
+
+      - name: Análise estática de segurança (Bandit)
+        run: uv run bandit -c pyproject.toml -r buscador scripts
+
+      - name: Criar o papel da aplicação no PostgreSQL
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGPASSWORD: ci-dono-descartavel
+          POSTGRES_USER: osint
+          POSTGRES_DB: osint
+          DB_PAPEL_APP: osint_app
+          DB_SENHA_APP: ci-app-descartavel
+        run: sh docker/postgres-init/01-papel-aplicacao.sh
+
+      - name: Testes (pytest, SQLite e PostgreSQL)
+        run: uv run pytest -rs
+
+      - name: Conferir que nenhum teste de PostgreSQL foi pulado
+        shell: bash  # com `-eo pipefail`: a falha do pytest não se perde no `tee`
+        run: |
+          uv run pytest -rs -q tests/test_seguranca.py tests/test_horizonte1.py \
+            tests/test_horizonte2.py tests/test_horizonte3.py -k postgres \
+            | tee /tmp/postgres.txt
+          ! grep -q "skipped" /tmp/postgres.txt
