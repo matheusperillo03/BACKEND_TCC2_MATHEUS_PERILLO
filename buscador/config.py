@@ -233,6 +233,20 @@ class Configuracao(BaseSettings):
     # Pesos diferentes dos do código, em JSON. Exemplo: {"L5": 0.5, "T2": 0.5}
     comb_pesos: str = ""
 
+    # ---- Importação sob ordem judicial (RF10) -------------------------------------------------
+    # Módulo separado, DESLIGADO por padrão. Ligado, exige chave de cifra PRÓPRIA (32 bytes em
+    # hexadecimal, diferente da chave da custódia) e guarda o dado numa base própria.
+    importacao_judicial_ativa: bool = False
+    importacao_judicial_chave: str = ""
+    # Vazio = arquivo SQLite próprio em ``<DADOS_DIR>/sigiloso/importacao_judicial.db``.
+    importacao_judicial_database_url: str = ""
+    # Raiz de onde os arquivos recebidos são lidos; sem ela, nada é importado.
+    importacao_judicial_dir_base: Path | None = None
+    # Perfis que podem registrar a decisão judicial (ato de entrada), por vírgula.
+    importacao_judicial_perfis: str = "delegado"
+    importacao_judicial_max_bytes_arquivo: int = Field(default=16 * 1024 * 1024, ge=1)
+    importacao_judicial_max_linhas: int = Field(default=200_000, ge=1)
+
     # ---- Monitoramento contínuo (RF06, H18) ---------------------------------------------------
     # Agendador interno (uma thread do próprio serviço). Com mais de um processo da API, ligue-o
     # em um só.
@@ -241,7 +255,12 @@ class Configuracao(BaseSettings):
     monitoramento_periodicidade_minima_horas: int = Field(default=1, ge=1, le=8760)
 
     @field_validator(
-        "cnpj_dir_base", "tse_dir_base", "editais_dir_base", "custodia_chave_arquivo", mode="before"
+        "cnpj_dir_base",
+        "tse_dir_base",
+        "editais_dir_base",
+        "custodia_chave_arquivo",
+        "importacao_judicial_dir_base",
+        mode="before",
     )
     @classmethod
     def _raiz_vazia_e_ausente(cls, valor: object) -> object:
@@ -341,6 +360,58 @@ class Configuracao(BaseSettings):
             )
         return frozenset(perfis)
 
+    def perfis_importacao_judicial(self) -> frozenset[str]:
+        perfis = {p.strip() for p in self.importacao_judicial_perfis.split(",") if p.strip()}
+        desconhecidos = perfis - set(PERFIS)
+        if desconhecidos or not perfis:
+            raise ErroConfiguracao(
+                "IMPORTACAO_JUDICIAL_PERFIS deve listar ao menos um perfil conhecido "
+                f"(aceitos: {PERFIS})."
+            )
+        return frozenset(perfis)
+
+    def chave_importacao_judicial(self) -> bytes:
+        """Chave de cifra própria do dado sob ordem judicial: nunca a mesma da custódia."""
+        try:
+            chave = cripto.interpretar_chave(
+                self.importacao_judicial_chave, "IMPORTACAO_JUDICIAL_CHAVE"
+            )
+        except cripto.ErroCripto as erro:
+            raise ErroConfiguracao(str(erro)) from erro
+        usadas = {self.custodia_chave.strip().lower(), self.auditoria_chave_hmac.strip().lower()}
+        usadas |= {c.strip().lower() for c in self.custodia_chaves_anteriores.split(",")}
+        if self.custodia_chave_arquivo is not None:
+            try:
+                usadas.add(cripto.ler_chave_de_arquivo(self.custodia_chave_arquivo).hex())
+            except cripto.ErroCripto:
+                pass
+        if chave.hex() in usadas:
+            raise ErroConfiguracao(
+                "IMPORTACAO_JUDICIAL_CHAVE não pode ser igual à chave da custódia nem à da "
+                "auditoria: o dado sob ordem judicial tem chave própria."
+            )
+        return chave
+
+    def url_importacao_judicial(self) -> str:
+        url = self.importacao_judicial_database_url.strip()
+        if url:
+            if url == self.database_url.strip():
+                raise ErroConfiguracao(
+                    "IMPORTACAO_JUDICIAL_DATABASE_URL não pode ser a base do dado aberto "
+                    "(DATABASE_URL): o dado sob ordem judicial fica em base separada."
+                )
+            return url
+        pasta = Path(self.dados_dir) / "sigiloso"
+        pasta.mkdir(parents=True, exist_ok=True)
+        return f"sqlite:///{pasta / 'importacao_judicial.db'}"
+
+    def validar_importacao_judicial(self) -> None:
+        self.perfis_importacao_judicial()
+        if not self.importacao_judicial_ativa:
+            return
+        self.chave_importacao_judicial()
+        self.url_importacao_judicial()
+
     def hosts_locais_ia(self) -> frozenset[str]:
         return frozenset(h.strip().lower() for h in self.ia_hosts_locais.split(",") if h.strip())
 
@@ -384,10 +455,12 @@ class Configuracao(BaseSettings):
         self.cofre()
         self.perfis_com_mfa()
         self.validar_ia()
+        self.validar_importacao_judicial()
         for nome, raiz in (
             ("CNPJ_DIR_BASE", self.cnpj_dir_base),
             ("TSE_DIR_BASE", self.tse_dir_base),
             ("EDITAIS_DIR_BASE", self.editais_dir_base),
+            ("IMPORTACAO_JUDICIAL_DIR_BASE", self.importacao_judicial_dir_base),
         ):
             if raiz is not None and not Path(raiz).is_dir():
                 raise ErroConfiguracao(f"{nome} não aponta para um diretório existente.")
