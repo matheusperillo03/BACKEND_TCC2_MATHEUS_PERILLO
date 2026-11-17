@@ -321,6 +321,20 @@ POLITICAS: dict[str, Politica] = {
             "atividades a mais por precaução."
         ),
     ),
+    # ---- Combinação: DECISÃO DO AUTOR (pesos e mínimos em ``tipologias.combinacao``) -----------
+    "COMB": Politica(
+        nome="Combinação de alertas na mesma entidade",
+        severidade="alta",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        grupo="combinacao",
+        politica_erro=(
+            "Prefere evitar falso positivo: exige um número mínimo de tipologias distintas e de "
+            "soma de pesos na mesma empresa ou pessoa, conta uma vez as tipologias que descrevem "
+            "o mesmo fato, não soma de novo as composições e ignora os alertas descartados. Não é "
+            "escore de culpa: herda as limitações de cada alerta da lista e serve só para "
+            "priorizar a análise."
+        ),
+    ),
 }
 
 

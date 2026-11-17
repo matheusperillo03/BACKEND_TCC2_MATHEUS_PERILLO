@@ -60,9 +60,17 @@ NOMES_PARAMETROS = (
     "l15_minimo_cnaes",
     "l15_minimo_categorias",
     "l16_dias_minimos",
+    # Alerta de combinação.
+    "comb_minimo_tipologias",
+    "comb_peso_minimo",
 )
 # Decimais que precisam ser maiores que zero.
-_PARAMETROS_DECIMAIS = ("t3_razao_minima", "t8_percentual_limite", "t8_percentual_limite_reforma")
+_PARAMETROS_DECIMAIS = (
+    "t3_razao_minima",
+    "t8_percentual_limite",
+    "t8_percentual_limite_reforma",
+    "comb_peso_minimo",
+)
 # Decimais que aceitam zero.
 _PARAMETROS_DECIMAIS_COM_ZERO = ("l14_valor_minimo",)
 
@@ -580,9 +588,13 @@ def parametros_padrao_lavagem() -> dict:
     return lavagem.parametros_padrao()
 
 
+# O alerta de combinação lê os alertas das demais: roda sempre por último.
+CODIGO_COMBINACAO = "COMB"
+
+
 def ordem_tipologias() -> list[str]:
-    """Códigos das tipologias na ordem de execução (T1 a T10, L1 a L16)."""
-    return sorted(TIPOLOGIAS, key=chave_do_codigo)
+    """Códigos das tipologias na ordem de execução (T1 a T10, L1 a L16 e a combinação)."""
+    return [*sorted(TIPOLOGIAS, key=chave_do_codigo), CODIGO_COMBINACAO]
 
 
 # ---- Execução ---------------------------------------------------------------------------------
@@ -608,6 +620,8 @@ _LIMITES_PARAMETROS = {
     "l15_minimo_cnaes": (2, 1_000),
     "l15_minimo_categorias": (2, 100),
     "l16_dias_minimos": (0, 36_500),
+    "comb_minimo_tipologias": (2, 30),
+    "comb_peso_minimo": (0.0, 100.0),
 }
 
 
@@ -694,13 +708,22 @@ def executar(
     """
     pedidas = list(dict.fromkeys(tipologias or ordem_tipologias()))
     for nome in pedidas:
-        if nome not in TIPOLOGIAS:
+        if nome not in TIPOLOGIAS and nome != CODIGO_COMBINACAO:
             raise ValueError(f"Tipologia desconhecida: {str(nome)[:20]}")
+    combinar = CODIGO_COMBINACAO in pedidas
+    pedidas = [nome for nome in pedidas if nome != CODIGO_COMBINACAO]
     # Quem chama com um conjunto parcial de parâmetros recebe os padrões do código para o resto.
     # ``limiares`` (gravado em cada alerta) guarda só os limiares numéricos recebidos; a
     # configuração estruturada usada por uma tipologia vai nos ``parametros`` do próprio alerta.
     limiares = {k: v for k, v in parametros.items() if k in NOMES_PARAMETROS}
-    parametros = {**parametros_padrao_h2(), **parametros_padrao_lavagem(), **parametros}
+    from buscador.tipologias import combinacao
+
+    parametros = {
+        **parametros_padrao_h2(),
+        **parametros_padrao_lavagem(),
+        **combinacao.parametros_padrao(),
+        **parametros,
+    }
     # Serializa execuções concorrentes do mesmo caso (no SQLite a cláusula é ignorada).
     sessao.execute(select(Caso.id).where(Caso.id == caso_id).with_for_update())
     ctx = carregar_contexto(sessao, caso_id, ler_captura, limites_pdf)
@@ -709,9 +732,34 @@ def executar(
         for d in TIPOLOGIAS[nome](ctx, parametros):
             detectados.setdefault(d.chave, d)
 
+    alertas = _reconciliar(sessao, caso_id, pedidas, detectados, limiares)
+    if combinar:
+        # A combinação lê TODOS os alertas ativos do caso, inclusive os de tipologias que não
+        # foram pedidas nesta execução, já com o resultado das que acabaram de rodar.
+        ativos = list(
+            sessao.execute(
+                select(Alerta).where(Alerta.caso_id == caso_id, Alerta.ativo.is_(True))
+            ).scalars()
+        )
+        combinados = {d.chave: d for d in combinacao.detectar(ativos, ctx.entidades, parametros)}
+        alertas += _reconciliar(sessao, caso_id, [CODIGO_COMBINACAO], combinados, limiares)
+    return ordenar(alertas)
+
+
+def _reconciliar(
+    sessao: Session,
+    caso_id: str,
+    codigos: list[str],
+    detectados: dict[str, AlertaDetectado],
+    limiares: dict,
+) -> list[Alerta]:
+    """Grava os detectados das tipologias ``codigos``: atualiza o alerta de mesma chave, apaga o
+    que deixou de ser detectado sem decisão e deixa inativo o que tinha decisão."""
+    if not codigos:
+        return []
     anteriores = list(
         sessao.execute(
-            select(Alerta).where(Alerta.caso_id == caso_id, Alerta.tipologia.in_(pedidas))
+            select(Alerta).where(Alerta.caso_id == caso_id, Alerta.tipologia.in_(codigos))
         ).scalars()
     )
     por_chave: dict[str, Alerta] = {}
@@ -738,4 +786,4 @@ def executar(
         alerta.ativo = True
         alertas.append(alerta)
     sessao.flush()
-    return ordenar(alertas)
+    return alertas

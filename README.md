@@ -449,7 +449,7 @@ Gatilhos novos (SQLite e PostgreSQL): `anotacoes_sem_update`, `anotacoes_sem_del
 - **H22:** testado com um servidor Ollama real (`qwen2.5:7b`, 16/11/2026), mas não com editais reais (em 17/11/2026 um edital real em PDF passou só pela extração de texto, sem a IA); sem medição de qualidade (precisão e revocação); PDF só com camada de texto (sem OCR); decisão única por sugestão; sem serviço `ollama` no Compose (o operador o acrescenta e declara o nome em `IA_HOSTS_LOCAIS`).
 
 
-## Lavagem de dinheiro e ocultação (tipologias L)
+## Lavagem de dinheiro e ocultação (tipologias L e combinação)
 
 As tipologias T1 a T10 sinalizam possíveis infrações antecedentes em contratações. As tipologias **L** sinalizam possível ocultação pela interposição de pessoas e empresas (Lei nº 9.613/1998, art. 1º). Todas são **indício cadastral**: nenhuma prova lavagem, e todo alerta continua sendo pista (RF12). Os sinais financeiros (depósitos, "correntes", beneficiário final de operação) não são verificáveis com dado aberto. As fichas, com o critério e a fonte de cada uma, estão em `docs/lavagem/tipologias-lavagem.md` e `docs/lavagem/fontes.md` (monografia); no código, em `buscador/tipologias/lavagem.py`. **Os limiares são decisão do autor, a validar com o orientador.**
 
@@ -504,6 +504,17 @@ Outros anos do MEI entram por `L6_LIMITES_MEI` (JSON, como os limites da T5). **
 - A T6 continua só com CEIS e CNEP.
 
 **Limitações:** a L6 compara valor contratado, não receita; o porte é o atual. Na L16, a entidade que só veio do Portal (sem natureza jurídica coletada no CNPJ) não é avaliada; o sinal com eleito ou PEP depende da L9. A contratada que tem ela mesma registro no CEPIM não gera alerta próprio (a T6 não cobre o CEPIM).
+
+### Alerta de combinação (`COMB`)
+
+Uma empresa ou pessoa com alertas de várias tipologias distintas recebe um alerta de combinação, que lista cada alerta, o peso e as evidências. A base é Velasco et al. (2021), seção 3.3: os padrões isolados pouco dizem, e "the risk of fraud increases when combinations of these risk patterns are identified". **Não é escore de culpa**: é pista para priorizar (RF12, RF14). Código em `buscador/tipologias/combinacao.py`; **pesos, mínimos e regras de contagem são decisão do autor**.
+
+- **Regra:** ao menos `COMB_MINIMO_TIPOLOGIAS` (2) tipologias distintas **e** soma de pesos de ao menos `COMB_PESO_MINIMO` (2,0), entre os alertas ativos e **não descartados** em que a entidade aparece.
+- **Pesos:** 1 por tipologia; 0,5 para os sinais fracos (L14 e L15); 0 para a L8, que é a composição de T1 e T7 e não soma de novo. `COMB_PESOS` (JSON) troca os pesos. Com os padrões, dois sinais fracos sozinhos não disparam.
+- **Mesmo fato conta uma vez:** L1 e T2 falam do mesmo endereço. Vários alertas da mesma tipologia também contam uma vez.
+- **Explicação:** `parametros.componentes` traz, de cada alerta, `alerta_id`, `tipologia`, `tipologia_nome`, `titulo`, `severidade`, `situacao`, `peso`, `sinal_fraco`, `conta` e `observacao` (por que não conta); e ainda `tipologias_distintas`, `soma_pesos`, os mínimos usados e o `aviso`. As evidências repetem até três de cada componente, com o código da tipologia.
+- **Execução:** a combinação roda por último (`POST .../alertas/executar` sem `tipologias`, ou com `"COMB"`), sobre todos os alertas ativos do caso. Severidade alta: abre a fila. Executar só outra tipologia, ou decidir um alerta, **não** recalcula a combinação; ela é refeita na execução seguinte.
+- **API:** catálogo e alertas ganham `peso` (o peso da tipologia na combinação).
 
 ### Não implementado
 

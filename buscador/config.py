@@ -226,6 +226,13 @@ class Configuracao(BaseSettings):
     l16_dias_minimos: int = Field(default=180, ge=0, le=36_500)
     l16_naturezas_sem_fins_lucrativos: str = "3069,3301,3999"
 
+    # ---- Alerta de combinação (RF14) ----------------------------------------------------------
+    # Tipologias distintas e soma de pesos mínimas na mesma empresa ou pessoa (decisão do autor).
+    comb_minimo_tipologias: int = Field(default=2, ge=2, le=30)
+    comb_peso_minimo: float = Field(default=2.0, gt=0, le=100, allow_inf_nan=False)
+    # Pesos diferentes dos do código, em JSON. Exemplo: {"L5": 0.5, "T2": 0.5}
+    comb_pesos: str = ""
+
     # ---- Monitoramento contínuo (RF06, H18) ---------------------------------------------------
     # Agendador interno (uma thread do próprio serviço). Com mais de um processo da API, ligue-o
     # em um só.
@@ -404,7 +411,7 @@ class Configuracao(BaseSettings):
     def parametros_tipologias(self) -> dict:
         """Limiares e configuração das tipologias. Os numéricos simples podem ser sobrescritos por
         execução; os estruturados (limites por ano, listas e expressões) só pela configuração."""
-        from buscador.tipologias import lavagem, legislacao
+        from buscador.tipologias import combinacao, lavagem, legislacao
 
         try:
             limites = legislacao.limites_dispensa(self.t5_limites_dispensa)
@@ -418,6 +425,7 @@ class Configuracao(BaseSettings):
             naturezas = lavagem.lista_de_codigos(
                 self.l16_naturezas_sem_fins_lucrativos, "L16_NATUREZAS_SEM_FINS_LUCRATIVOS"
             )
+            pesos = combinacao.pesos(self.comb_pesos)
         except ValueError as erro:
             raise ErroConfiguracao(str(erro)) from erro
         return {
@@ -439,6 +447,9 @@ class Configuracao(BaseSettings):
             "l6_tolerancia_transicao": self.l6_tolerancia_transicao,
             "l16_dias_minimos": self.l16_dias_minimos,
             "l16_naturezas_sem_fins_lucrativos": naturezas,
+            "comb_minimo_tipologias": self.comb_minimo_tipologias,
+            "comb_peso_minimo": self.comb_peso_minimo,
+            "comb_pesos": pesos,
             "t1_dias_minimos": self.t1_dias_minimos,
             "t2_minimo_empresas": self.t2_minimo_empresas,
             "t3_razao_minima": self.t3_razao_minima,
