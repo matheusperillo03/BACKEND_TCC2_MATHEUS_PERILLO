@@ -1,0 +1,73 @@
+{
+  "99001": [
+    {
+      "servidor": {
+        "id": 1,
+        "idServidorAposentadoPensionista": 1,
+        "pessoa": {
+          "nome": "RICARDO FICTICIO LIMA",
+          "cpfFormatado": "000.666.666-46",
+          "tipo": "F"
+        },
+        "situacao": "ATIVO PERMANENTE",
+        "tipoServidor": "Civil",
+        "orgaoServidorLotacao": {
+          "codigo": "99001",
+          "nome": "ORGAO SIAPE SINTETICO",
+          "sigla": "OSS"
+        },
+        "orgaoServidorExercicio": {
+          "codigo": "99001",
+          "nome": "ORGAO SIAPE SINTETICO",
+          "sigla": "OSS"
+        }
+      }
+    },
+    {
+      "servidor": {
+        "id": 2,
+        "idServidorAposentadoPensionista": 2,
+        "pessoa": {
+          "nome": "PEDRO EXEMPLO ALVES",
+          "cpfFormatado": "***.404.040-**",
+          "tipo": "F"
+        },
+        "situacao": "ATIVO PERMANENTE",
+        "tipoServidor": "Civil",
+        "orgaoServidorLotacao": {
+          "codigo": "99001",
+          "nome": "ORGAO SIAPE SINTETICO",
+          "sigla": "OSS"
+        },
+        "orgaoServidorExercicio": {
+          "codigo": "99001",
+          "nome": "ORGAO SIAPE SINTETICO",
+          "sigla": "OSS"
+        }
+      }
+    },
+    {
+      "servidor": {
+        "id": 3,
+        "idServidorAposentadoPensionista": 3,
+        "pessoa": {
+          "nome": "SERVIDORA SEM VINCULO SINTETICA",
+          "cpfFormatado": "***.505.050-**",
+          "tipo": "F"
+        },
+        "situacao": "ATIVO PERMANENTE",
+        "tipoServidor": "Civil",
+        "orgaoServidorLotacao": {
+          "codigo": "99001",
+          "nome": "ORGAO SIAPE SINTETICO",
+          "sigla": "OSS"
+        },
+        "orgaoServidorExercicio": {
+          "codigo": "99001",
+          "nome": "ORGAO SIAPE SINTETICO",
+          "sigla": "OSS"
+        }
+      }
+    }
+  ]
+}

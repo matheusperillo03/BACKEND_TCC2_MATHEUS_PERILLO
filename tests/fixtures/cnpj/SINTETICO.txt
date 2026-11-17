@@ -1,0 +1,3 @@
+Dados SINTETICOS gerados por scripts/gerar_fixtures.py para testes e demonstracao.
+Nenhum registro desta pasta veio da Receita Federal. A presenca deste arquivo faz o
+conector cnpj_arquivo marcar as capturas como simuladas (simulado://).

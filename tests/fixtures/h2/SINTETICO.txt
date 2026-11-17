@@ -1,0 +1,1 @@
+Arquivos sintéticos (fixtures de teste e de demonstração). Nenhum dado é real.

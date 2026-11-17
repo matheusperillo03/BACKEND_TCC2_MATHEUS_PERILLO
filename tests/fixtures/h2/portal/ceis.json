@@ -1,0 +1,27 @@
+{
+  "90000006000151": [
+    {
+      "id": 900001,
+      "dataInicioSancao": "01/01/2025",
+      "dataFimSancao": "01/01/2027",
+      "tipoSancao": {
+        "descricaoResumida": "Impedimento sintético de contratar",
+        "descricaoPortal": "Impedimento sintético de contratar"
+      },
+      "orgaoSancionador": {
+        "nome": "ORGAO SANCIONADOR SINTETICO",
+        "siglaUf": "GO"
+      },
+      "sancionado": {
+        "nome": "ZETA CONSULTORIA SINTETICA LTDA",
+        "codigoFormatado": "90.000.006/0001-51"
+      },
+      "pessoa": {
+        "cnpjFormatado": "90.000.006/0001-51",
+        "razaoSocialReceita": "ZETA CONSULTORIA SINTETICA LTDA",
+        "tipo": "J"
+      },
+      "numeroProcesso": "SINT-900001/2025"
+    }
+  ]
+}

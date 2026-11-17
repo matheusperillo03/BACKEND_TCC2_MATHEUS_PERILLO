@@ -1,0 +1,103 @@
+{
+  "90100003000190/2026/108": [
+    {
+      "sequencialTermoContrato": 1,
+      "numeroTermoContrato": "1/2026",
+      "tipoTermoContratoNome": "Termo Aditivo",
+      "objetoTermoContrato": "Termo Aditivo sintético nº 1 do contrato 108",
+      "valorAcrescido": 20000.0,
+      "qualificacaoAcrescimoSupressao": true,
+      "qualificacaoReajuste": false,
+      "qualificacaoVigencia": false,
+      "qualificacaoFornecedor": false,
+      "dataAssinatura": "2026-05-01",
+      "fundamentoLegal": "Fundamento sintético",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      }
+    },
+    {
+      "sequencialTermoContrato": 2,
+      "numeroTermoContrato": "2/2026",
+      "tipoTermoContratoNome": "Termo Aditivo",
+      "objetoTermoContrato": "Termo Aditivo sintético nº 2 do contrato 108",
+      "valorAcrescido": 10000.0,
+      "qualificacaoAcrescimoSupressao": true,
+      "qualificacaoReajuste": false,
+      "qualificacaoVigencia": false,
+      "qualificacaoFornecedor": false,
+      "dataAssinatura": "2026-08-01",
+      "fundamentoLegal": "Fundamento sintético",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      }
+    }
+  ],
+  "90100003000190/2026/109": [
+    {
+      "sequencialTermoContrato": 1,
+      "numeroTermoContrato": "1/2026",
+      "tipoTermoContratoNome": "Termo Aditivo",
+      "objetoTermoContrato": "Termo Aditivo sintético nº 1 do contrato 109",
+      "valorAcrescido": 60000.0,
+      "qualificacaoAcrescimoSupressao": true,
+      "qualificacaoReajuste": false,
+      "qualificacaoVigencia": false,
+      "qualificacaoFornecedor": false,
+      "dataAssinatura": "2026-07-01",
+      "fundamentoLegal": "Fundamento sintético",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      }
+    }
+  ],
+  "90100003000190/2026/110": [
+    {
+      "sequencialTermoContrato": 1,
+      "numeroTermoContrato": "1/2026",
+      "tipoTermoContratoNome": "Termo Aditivo",
+      "objetoTermoContrato": "Termo Aditivo sintético nº 1 do contrato 110",
+      "valorAcrescido": 20000.0,
+      "qualificacaoAcrescimoSupressao": true,
+      "qualificacaoReajuste": false,
+      "qualificacaoVigencia": false,
+      "qualificacaoFornecedor": false,
+      "dataAssinatura": "2026-07-10",
+      "fundamentoLegal": "Fundamento sintético",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      }
+    },
+    {
+      "sequencialTermoContrato": 2,
+      "numeroTermoContrato": "2/2026",
+      "tipoTermoContratoNome": "Termo de Apostilamento",
+      "objetoTermoContrato": "Termo de Apostilamento sintético nº 2 do contrato 110",
+      "valorAcrescido": 50000.0,
+      "qualificacaoAcrescimoSupressao": false,
+      "qualificacaoReajuste": true,
+      "qualificacaoVigencia": false,
+      "qualificacaoFornecedor": false,
+      "dataAssinatura": "2026-09-10",
+      "fundamentoLegal": "Fundamento sintético",
+      "orgaoEntidade": {
+        "cnpj": "90100003000190",
+        "razaoSocial": "PREFEITURA SINTETICA DE EXEMPLOPOLIS",
+        "poderId": "E",
+        "esferaId": "M"
+      }
+    }
+  ]
+}
