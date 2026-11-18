@@ -53,6 +53,9 @@ def validar_json_limitado(valor: object) -> object:
 
 class Saude(BaseModel):
     status: str = "ok"
+    # Só diz se os tokens de desenvolvimento existem (MODO_DEV=1), para a tela de entrada não
+    # oferecer um acesso que o servidor recusa. Não é segredo: /docs já responde 404 fora do modo.
+    modo_dev: bool = False
 
 
 class UsuarioSaida(BaseModel):
