@@ -1695,7 +1695,7 @@ ATO_DE_PDF = "\n".join(
         "/",
         "2026",
         " ",
-        "1 . ",
+        "1. ",
         "APROVO",
         " o Termo de Referência sintético 12 (",
         "900000001",
@@ -1728,7 +1728,7 @@ ATO_DE_PDF = "\n".join(
             "objeto",
             "Termo de Referência sintético 12",
             "1. APROVO o Termo de Referência sintético 12 (900000001), para fins de teste.",
-            "1 . \nAPROVO\n o Termo de Referência sintético 12 (\n900000001\n), para fins de teste.",
+            "1. \nAPROVO\n o Termo de Referência sintético 12 (\n900000001\n), para fins de teste.",
         ),
         (
             "valor",
@@ -1738,15 +1738,15 @@ ATO_DE_PDF = "\n".join(
         ),
         # A quebra cai dentro da palavra, que é também o valor extraído.
         ("objeto", "Objeto", "Objeto: serviço sintético", "O\nbjeto\n: \nserviço sintético"),
-        # O contrário: o modelo põe um espaço que o documento não tem.
-        ("valor", "1.234,56", "R$ 1.234, 56 (valor sintético)", "R$ \n1.234,56 (valor sintético)"),
+        # O modelo junta a quebra de linha com espaço num ponto e sem espaço em outro.
+        ("objeto", "07/2026", "SINTÉTICA Nº 07 /2026", "SINTÉTICA Nº 07\n/\n2026"),
     ],
 )
-def test_h22_trecho_quebrado_pela_extracao_do_pdf_e_achado_sem_os_espacos(
+def test_h22_trecho_quebrado_pela_extracao_do_pdf_e_achado_pela_quebra_de_linha(
     tipo, valor, trecho_do_modelo, recorte_original
 ):
     item = {"tipo": tipo, "valor": valor, "trecho": trecho_do_modelo}
-    # A busca com um espaço por sequência não acha: o documento tem espaço onde o modelo não tem.
+    # A busca com um espaço por sequência não acha: o documento tem quebra onde o modelo não tem.
     normalizado = ia.normalizar_espacos(ATO_DE_PDF)
     assert ia.localizar_trecho(normalizado, trecho_do_modelo) is None
     verificacao = _verificar(ATO_DE_PDF, item)
@@ -1755,17 +1755,17 @@ def test_h22_trecho_quebrado_pela_extracao_do_pdf_e_achado_sem_os_espacos(
     # As posições são as do texto original: o destaque cobre o recorte com as quebras dele.
     assert ATO_DE_PDF[inicio:fim] == recorte_original
     assert inicio == ATO_DE_PDF.index(recorte_original)
-    assert verificacao.sem_espacos == 1
+    assert verificacao.com_quebra_de_linha == 1
 
 
-def test_h22_busca_sem_espacos_nao_e_contada_quando_a_primeira_busca_acha():
+def test_h22_segunda_busca_nao_e_contada_quando_a_primeira_busca_acha():
     item = {
         "tipo": "empresa",
         "valor": "FORNECEDORA SINTETICA DE EXEMPLO LTDA",
         "trecho": "Empresa: FORNECEDORA SINTETICA DE EXEMPLO LTDA",
     }
     verificacao = _verificar(ATO_DE_PDF, item)
-    assert verificacao.recusas == [] and verificacao.sem_espacos == 0
+    assert verificacao.recusas == [] and verificacao.com_quebra_de_linha == 0
     ((_, inicio, fim),) = verificacao.aceitos
     assert ATO_DE_PDF[inicio:fim] == "Empresa: \nFORNECEDORA SINTETICA DE EXEMPLO LTDA"
 
@@ -1780,16 +1780,78 @@ def test_h22_busca_sem_espacos_nao_e_contada_quando_a_primeira_busca_acha():
         "Objeto: servico sintético",  # acento que falta
         "objeto: serviço sintético",  # maiúscula trocada
         "APROVO para fins de teste.",  # pedaços verdadeiros, mas não seguidos no documento
+        # Espaço comum, na mesma linha do documento, não pode faltar no trecho.
+        "FORNECEDORASINTETICA DE EXEMPLO LTDA",
+        "Termo de Referência sintético12",
+        "o Termode Referência",
+        "1.234,56 (valorsintético)",
+        # O trecho não ganha espaço onde o documento não tem nenhum.
+        "R$ 1.234, 56 (valor sintético)",
+        "FORNECE DORA SINTETICA",
     ],
 )
-def test_h22_busca_sem_espacos_continua_recusando_o_que_nao_esta_no_documento(trecho):
+def test_h22_segunda_busca_continua_recusando_o_que_nao_esta_no_documento(trecho):
     item = {"tipo": "objeto", "valor": trecho.split()[0], "trecho": trecho}
     verificacao = _verificar(ATO_DE_PDF, item)
     assert verificacao.aceitos == []
     assert [r["motivo"] for r in verificacao.recusas] == ["trecho_nao_literal"]
 
 
-def test_h22_execucao_conta_os_trechos_achados_so_sem_os_espacos(tmp_path):
+# Números separados por espaço comum na mesma linha e, mais abaixo, por quebra de linha.
+ITENS_NUMERADOS = (
+    "Tabela sintética: item 1 20 unidades, lote 3 45.\nSaldo sintético: 6\n78 unidades.\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("tipo", "valor", "trecho"),
+    [
+        ("valor", "120", "item 120 unidades"),  # "1 20" na mesma linha não é "120"
+        ("objeto", "120", "item 120 unidades"),
+        ("valor", "345", "lote 345"),
+        ("objeto", "item 120", "Tabela sintética: item 120 unidades"),
+    ],
+)
+def test_h22_espaco_comum_entre_numeros_nao_e_ignorado_no_trecho(tipo, valor, trecho):
+    verificacao = _verificar(ITENS_NUMERADOS, {"tipo": tipo, "valor": valor, "trecho": trecho})
+    assert verificacao.aceitos == []
+    assert [r["motivo"] for r in verificacao.recusas] == ["trecho_nao_literal"]
+
+
+@pytest.mark.parametrize(
+    ("tipo", "valor"),
+    [
+        ("valor", "120"),
+        ("objeto", "120"),
+        ("valor", "345"),
+        ("objeto", "item 120"),
+        ("data", "2034"),
+    ],
+)
+def test_h22_espaco_comum_entre_numeros_nao_e_ignorado_no_amparo_do_valor(tipo, valor):
+    # O trecho é literal; o valor junta números que o documento separa com espaço comum.
+    trecho = "item 1 20 unidades, lote 3 45."
+    verificacao = _verificar(ITENS_NUMERADOS, {"tipo": tipo, "valor": valor, "trecho": trecho})
+    assert verificacao.aceitos == []
+    assert [r["motivo"] for r in verificacao.recusas] == ["valor_fora_do_trecho"]
+
+
+@pytest.mark.parametrize(
+    "trecho", ["Saldo sintético: 678 unidades", "Saldo sintético: 6 78 unidades"]
+)
+@pytest.mark.parametrize(
+    ("tipo", "valor"), [("valor", "678"), ("objeto", "678"), ("objeto", "6 78")]
+)
+def test_h22_quebra_de_linha_entre_numeros_pode_faltar_no_trecho_e_no_valor(trecho, tipo, valor):
+    # Limite conhecido da regra: na quebra de linha não dá para saber se o número continua.
+    verificacao = _verificar(ITENS_NUMERADOS, {"tipo": tipo, "valor": valor, "trecho": trecho})
+    assert verificacao.recusas == []
+    ((_, inicio, fim),) = verificacao.aceitos
+    assert ITENS_NUMERADOS[inicio:fim] == "Saldo sintético: 6\n78 unidades"
+    assert verificacao.com_quebra_de_linha == ("678" in trecho)
+
+
+def test_h22_execucao_conta_os_trechos_achados_so_pela_quebra_de_linha(tmp_path):
     corrido = {"tipo": "valor", "valor": "R$ 1.234,56", "trecho": "Taxa Sintética: R$ 1.234,56"}
     direto = {
         "tipo": "empresa",
@@ -1806,7 +1868,7 @@ def test_h22_execucao_conta_os_trechos_achados_so_sem_os_espacos(tmp_path):
         extracao = _extrair(cliente, caso_id, captura_id).json()
         assert (extracao["itens_recebidos"], extracao["itens_aceitos"]) == (3, 2)
         assert [x["motivo"] for x in extracao["recusas"]] == ["trecho_nao_literal"]
-        assert extracao["parametros"]["trechos_localizados_sem_espacos"] == 1
+        assert extracao["parametros"]["trechos_localizados_com_quebra_de_linha"] == 1
         texto = cliente.get(f"/casos/{caso_id}/capturas/{captura_id}/texto", headers=H_ANA).json()
         sugestoes = cliente.get(f"/casos/{caso_id}/sugestoes-ia", headers=H_ANA).json()
         assert len(sugestoes) == 2

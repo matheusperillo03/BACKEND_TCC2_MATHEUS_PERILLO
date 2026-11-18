@@ -10,19 +10,23 @@ Regras (RF13, RNF05, H22), aplicadas a QUALQUER provedor:
    única equivalência é a de espaços em branco: uma sequência de espaço, tabulação, quebra de
    linha (``\n``, ``\r``) ou espaço não separável (NBSP) vale um espaço, porque o modelo costuma
    devolver com espaço simples o texto que no documento está quebrado em duas linhas. Nenhum
-   espaço é criado nem removido nessa primeira busca. Se ela falha, uma segunda busca compara
-   os dois lados SEM os espaços em branco (decisão do autor, piloto de 18/11/2026): a extração
-   de texto de PDF quebra a linha no meio de expressões ("Nº 02", "/", "2026" em três linhas;
-   "(" e ")" separados do número; "Valor" e ":" em linhas diferentes), e o modelo devolve o
-   texto corrido. Todo caractere que não é espaço continua exigido, igual e na mesma ordem. O
-   que se grava é o recorte do texto ORIGINAL (com as quebras de linha dele) e as posições
-   desse recorte; a execução conta quantos trechos só foram achados na segunda busca. Item com
-   trecho que não está no texto é recusado e fica registrado na execução, com o motivo.
+   espaço é criado nem removido nessa primeira busca. Se ela falha, uma segunda busca aceita
+   que o trecho NÃO tenha espaço onde o texto da captura tem uma quebra de linha (decisão do
+   autor, piloto de 18/11/2026): a extração de texto de PDF quebra a linha no meio de
+   expressões ("Nº 02", "/", "2026" em três linhas; "(" e ")" separados do número; "Valor" e
+   ":" em linhas diferentes), e o modelo devolve o texto corrido. Só a sequência de espaços em
+   branco que contém ``\n`` ou ``\r`` no texto da captura pode faltar no trecho; o espaço
+   comum dentro da mesma linha continua exigido, e o trecho não pode ter espaço onde a captura
+   não tem nenhum. Sem essa restrição, "item 1 20" sustentaria um valor "120" inventado. Todo
+   caractere que não é espaço continua exigido, igual e na mesma ordem. O que se grava é o
+   recorte do texto ORIGINAL (com as quebras de linha dele) e as posições desse recorte; a
+   execução conta quantos trechos só foram achados na segunda busca. Item com trecho que não
+   está no texto é recusado e fica registrado na execução, com o motivo.
 3. **Valor amparado no trecho.** O valor extraído (e cada campo, como o CNPJ) precisa aparecer
    dentro do próprio trecho citado, com a mesma equivalência de espaços em branco (e ignorando
    maiúsculas, acentos e pontuação; para CNPJ e CPF, comparando os dígitos) e, se preciso, a
-   mesma segunda comparação sem espaços. Um trecho verdadeiro não serve de álibi para um valor
-   inventado.
+   mesma segunda comparação: só a quebra de linha do recorte pode faltar no valor. Um trecho
+   verdadeiro não serve de álibi para um valor inventado.
 4. **Rastro.** Cada execução grava provedor, modelo, versão (resumo do modelo e versão do
    servidor), parâmetros, SHA-256 do prompt e SHA-256 da captura analisada.
 5. **Decisão humana.** O item aceito pelas verificações vira SUGESTÃO pendente. Só a decisão do
@@ -36,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -191,6 +196,10 @@ def dividir_em_blocos(texto: str, tamanho: int) -> list[str]:
 # Espaços em branco equivalentes entre si na comparação do trecho. A lista é fechada de
 # propósito: espaço, tabulação, quebras de linha e NBSP. Nada mais é equivalente a nada.
 ESPACOS_EQUIVALENTES = frozenset(" \t\n\r\u00a0")
+# Quebras de linha: só a sequência de espaços que contém uma delas pode faltar no trecho.
+QUEBRAS_DE_LINHA = frozenset("\n\r")
+# Marca, nas formas de comparação, da sequência de espaços em branco que contém quebra de linha.
+MARCA_QUEBRA = "\n"
 
 
 @dataclass(frozen=True)
@@ -199,22 +208,23 @@ class TextoNormalizado:
 
     ``inicios[i]`` e ``fins[i]`` delimitam, no texto ORIGINAL, o caractere ``i`` do texto
     normalizado: um caractere comum ocupa uma posição; o espaço que representa uma sequência
-    cobre a sequência inteira."""
+    cobre a sequência inteira. ``quebras`` são as posições, no texto normalizado, dos espaços
+    cuja sequência original contém quebra de linha."""
 
     texto: str
     inicios: tuple[int, ...]
     fins: tuple[int, ...]
+    quebras: frozenset[int] = frozenset()
 
     def intervalo_original(self, posicao: int, tamanho: int) -> tuple[int, int]:
         """Intervalo, no original, de ``tamanho`` caracteres normalizados desde ``posicao``."""
         return self.inicios[posicao], self.fins[posicao + tamanho - 1]
 
     @cached_property
-    def sem_espacos(self) -> tuple[str, tuple[int, ...]]:
-        """O texto sem os espaços em branco e, para cada caractere dele, o índice no texto
-        normalizado (de onde ``inicios`` e ``fins`` levam ao original)."""
-        indices = tuple(i for i, c in enumerate(self.texto) if c != " ")
-        return "".join(self.texto[i] for i in indices), indices
+    def com_quebras(self) -> str:
+        """O texto normalizado, posição a posição, com ``MARCA_QUEBRA`` no lugar do espaço que
+        representa uma sequência com quebra de linha."""
+        return "".join(MARCA_QUEBRA if i in self.quebras else c for i, c in enumerate(self.texto))
 
 
 def normalizar_espacos(texto: str) -> TextoNormalizado:
@@ -224,9 +234,12 @@ def normalizar_espacos(texto: str) -> TextoNormalizado:
     partes: list[str] = []
     inicios: list[int] = []
     fins: list[int] = []
+    quebras: set[int] = set()
     em_espaco = False
     for i, c in enumerate(texto):
         if c in ESPACOS_EQUIVALENTES:
+            if c in QUEBRAS_DE_LINHA:
+                quebras.add(len(partes) - 1 if em_espaco else len(partes))
             if em_espaco:
                 fins[-1] = i + 1
                 continue
@@ -237,7 +250,7 @@ def normalizar_espacos(texto: str) -> TextoNormalizado:
         partes.append(c)
         inicios.append(i)
         fins.append(i + 1)
-    return TextoNormalizado("".join(partes), tuple(inicios), tuple(fins))
+    return TextoNormalizado("".join(partes), tuple(inicios), tuple(fins), frozenset(quebras))
 
 
 def localizar_trecho(original: TextoNormalizado, trecho: str) -> tuple[int, int] | None:
@@ -254,31 +267,67 @@ def localizar_trecho(original: TextoNormalizado, trecho: str) -> tuple[int, int]
     return original.intervalo_original(posicao, len(alvo))
 
 
-def localizar_trecho_sem_espacos(original: TextoNormalizado, trecho: str) -> tuple[int, int] | None:
-    """Segunda busca: o trecho comparado com o texto SEM os espaços em branco dos dois lados.
+def _padrao_com_quebra_opcional(alvo: str) -> re.Pattern[str]:
+    """Expressão que procura ``alvo`` (espaços já reduzidos a um) num texto marcado com
+    ``MARCA_QUEBRA``: o espaço do alvo exige um espaço em branco do texto, com ou sem quebra de
+    linha; entre dois caracteres seguidos do alvo, o texto pode ter uma quebra de linha, e só
+    ela. O espaço comum do texto nunca é pulado."""
+    partes: list[str] = []
+    anterior_e_espaco = True
+    for c in alvo:
+        if c == " ":
+            partes.append(f"[ {MARCA_QUEBRA}]")
+        else:
+            if not anterior_e_espaco:
+                partes.append(f"{MARCA_QUEBRA}?")
+            partes.append(re.escape(c))
+        anterior_e_espaco = c == " "
+    return re.compile("".join(partes))
+
+
+def localizar_trecho_com_quebra_de_linha(
+    original: TextoNormalizado, trecho: str
+) -> tuple[int, int] | None:
+    """Segunda busca: o trecho pode não ter espaço onde o texto da captura tem quebra de linha.
 
     Serve para o texto de PDF, em que a extração põe quebras de linha no meio de expressões
-    que o modelo devolve corridas. Os caracteres que não são espaço têm de ser os mesmos, na
-    mesma ordem e seguidos. O intervalo devolvido é o do texto original, do primeiro ao último
-    caractere casado, com os espaços e quebras que o documento tem entre eles."""
-    alvo = normalizar_espacos(trecho).texto.replace(" ", "")
-    if len(alvo) < MIN_TRECHO:
+    que o modelo devolve corridas, com ou sem espaço no lugar da quebra. Só a sequência de
+    espaços em branco que contém ``\n`` ou ``\r`` no texto da captura pode faltar no trecho: o
+    espaço comum dentro da mesma linha continua exigido, e o trecho não ganha espaço onde a
+    captura não tem. Os outros caracteres têm de ser os mesmos, na mesma ordem e seguidos. O
+    intervalo devolvido é o do texto original, com as quebras que o documento tem."""
+    alvo = normalizar_espacos(trecho).texto
+    if len(alvo.replace(" ", "")) < MIN_TRECHO:
         return None
-    compacto, indices = original.sem_espacos
-    posicao = compacto.find(alvo)
-    if posicao < 0:
+    achado = _padrao_com_quebra_opcional(alvo).search(original.com_quebras)
+    if achado is None:
         return None
-    return original.inicios[indices[posicao]], original.fins[indices[posicao + len(alvo) - 1]]
+    return original.inicios[achado.start()], original.fins[achado.end() - 1]
+
+
+def _sem_acento_nem_pontuacao(texto: str) -> str:
+    """Sem acentos, em minúsculas e com um espaço no lugar de cada caractere de pontuação."""
+    sem_acento = "".join(
+        c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)
+    )
+    return "".join(c if c.isalnum() or c == MARCA_QUEBRA else " " for c in sem_acento.casefold())
 
 
 def _comparavel(texto: str) -> str:
     """Forma de comparação do valor com o trecho: sem acentos, sem pontuação, minúsculas e com
     os espaços em branco reduzidos (toda sequência de ``ESPACOS_EQUIVALENTES`` vira um espaço)."""
-    texto = normalizar_espacos(texto).texto
-    sem_acento = "".join(
-        c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c)
+    return " ".join(_sem_acento_nem_pontuacao(normalizar_espacos(texto).texto).split())
+
+
+def _comparavel_com_quebras(trecho: str) -> str:
+    """A mesma forma de ``_comparavel``, com ``MARCA_QUEBRA`` onde o trecho tem, entre duas
+    letras ou algarismos, só espaços em branco com quebra de linha. Se entre eles há também
+    pontuação ou espaço comum de outra sequência, o separador é um espaço, que não é pulado."""
+    marcado = _sem_acento_nem_pontuacao(normalizar_espacos(trecho).com_quebras)
+    separado = re.sub(
+        f"[ {MARCA_QUEBRA}]+", lambda m: MARCA_QUEBRA if " " not in m.group() else " ", marcado
     )
-    return " ".join("".join(c if c.isalnum() else " " for c in sem_acento.casefold()).split())
+    return separado.strip(f" {MARCA_QUEBRA}")
 
 
 def _amparado(
@@ -289,14 +338,19 @@ def _amparado(
         posicoes = somente_alfanumericos(valor)
         return bool(posicoes) and posicoes in somente_alfanumericos(trecho)
     if so_digitos:
+        # Os dígitos não atravessam espaço comum do trecho: "1 20" não ampara "120". Pontuação
+        # ("1.234,56") e quebra de linha entre eles não separam.
         digitos = somente_digitos(valor)
-        return bool(digitos) and digitos in somente_digitos(trecho)
+        pedacos = normalizar_espacos(trecho).com_quebras.split(" ")
+        return bool(digitos) and any(digitos in somente_digitos(p) for p in pedacos)
     alvo = _comparavel(valor)
     if not alvo:
         return False
-    citado = _comparavel(trecho)
-    # Segunda comparação sem espaços: a quebra de linha do PDF pode cair dentro do valor.
-    return alvo in citado or alvo.replace(" ", "") in citado.replace(" ", "")
+    if alvo in _comparavel(trecho):
+        return True
+    # Segunda comparação: a quebra de linha do PDF pode cair dentro do valor. Só ela pode
+    # faltar no valor; o espaço comum do trecho continua exigido ("1 20" não ampara "120").
+    return _padrao_com_quebra_opcional(alvo).search(_comparavel_com_quebras(trecho)) is not None
 
 
 @dataclass
@@ -305,8 +359,8 @@ class Verificacao:
     aceitos: list[tuple[ItemExtraido, int, int]] = field(default_factory=list)
     recusas: list[dict] = field(default_factory=list)
     recebidos: int = 0
-    # Aceitos cujo trecho só foi achado na segunda busca (sem os espaços em branco).
-    sem_espacos: int = 0
+    # Aceitos cujo trecho só foi achado na segunda busca (quebra de linha sem espaço no trecho).
+    com_quebra_de_linha: int = 0
 
 
 def _recusa(motivo: str, bruto: object) -> dict:
@@ -339,9 +393,9 @@ def verificar_itens(texto: str, brutos: list, verificacao: Verificacao, max_iten
             verificacao.recusas.append(_recusa("trecho_vazio", bruto))
             continue
         intervalo = localizar_trecho(normalizado, item.trecho)
-        so_sem_espacos = intervalo is None
-        if so_sem_espacos:
-            intervalo = localizar_trecho_sem_espacos(normalizado, item.trecho)
+        so_com_quebra = intervalo is None
+        if so_com_quebra:
+            intervalo = localizar_trecho_com_quebra_de_linha(normalizado, item.trecho)
         if intervalo is None:
             verificacao.recusas.append(_recusa("trecho_nao_literal", bruto))
             continue
@@ -368,7 +422,7 @@ def verificar_itens(texto: str, brutos: list, verificacao: Verificacao, max_iten
             continue
         vistos.add(marca)
         verificacao.aceitos.append((item, posicao, fim))
-        verificacao.sem_espacos += so_sem_espacos
+        verificacao.com_quebra_de_linha += so_com_quebra
 
 
 def executar(
@@ -468,7 +522,7 @@ def executar(
     extracao.situacao = "sucesso"
     extracao.parametros = {
         **extracao.parametros,
-        "trechos_localizados_sem_espacos": verificacao.sem_espacos,
+        "trechos_localizados_com_quebra_de_linha": verificacao.com_quebra_de_linha,
     }
     extracao.itens_recebidos = verificacao.recebidos
     extracao.itens_aceitos = len(verificacao.aceitos)
