@@ -86,6 +86,7 @@ def _extracao_para_dict(e: ExtracaoIA, com_sugestoes: bool = False) -> dict:
         "itens_aceitos": e.itens_aceitos,
         "itens_recusados": e.itens_recusados,
         "recusas": e.recusas or [],
+        "metricas": e.metricas,
         "usuario": e.usuario,
         "iniciado_em": e.iniciado_em,
         "concluido_em": e.concluido_em,
@@ -185,6 +186,7 @@ def extrair(caso_id: str, captura_id: str, request: Request, ctx: Contexto = Dep
             "itens_aceitos": extracao.itens_aceitos,
             "itens_recusados": extracao.itens_recusados,
             "motivos_de_recusa": sorted({r["motivo"] for r in extracao.recusas or []}),
+            "metricas": extracao.metricas,
         },
     )
     ctx.concluir()

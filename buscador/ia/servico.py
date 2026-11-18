@@ -28,7 +28,10 @@ Regras (RF13, RNF05, H22), aplicadas a QUALQUER provedor:
    mesma segunda comparação: só a quebra de linha do recorte pode faltar no valor. Um trecho
    verdadeiro não serve de álibi para um valor inventado.
 4. **Rastro.** Cada execução grava provedor, modelo, versão (resumo do modelo e versão do
-   servidor), parâmetros, SHA-256 do prompt e SHA-256 da captura analisada.
+   servidor), parâmetros, SHA-256 do prompt e SHA-256 da captura analisada. Grava também o que
+   foi medido (``metricas``): tempo de parede e tokens, por bloco e no total, a janela de
+   contexto em uso, o aviso de saída cortada e, na falha, o bloco, a causa e o tempo já gasto.
+   As métricas só observam: nenhuma delas muda o que é enviado ao modelo nem o que é aceito.
 5. **Decisão humana.** O item aceito pelas verificações vira SUGESTÃO pendente. Só a decisão do
    investigador (auditada, com justificativa) pode transformá-la em entidade.
 
@@ -41,6 +44,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -68,6 +72,8 @@ TIPOS = ("empresa", "orgao", "pessoa", "valor", "data", "objeto")
 CAMPOS_PERMITIDOS = ("cnpj", "cpf", "papel")
 MIN_TRECHO = 3
 MAX_RECUSAS_GUARDADAS = 200
+# Teto de registros por bloco guardados nas métricas (os totais cobrem todos os blocos).
+MAX_BLOCOS_METRICAS = 1_000
 ARESTA_CITACAO = "citado_em"
 
 
@@ -113,11 +119,15 @@ PROMPT_SHA256 = hashlib.sha256(
 
 
 class ErroExtracao(Exception):
-    """A extração não pôde ser feita (texto ilegível, provedor indisponível, resposta inválida)."""
+    """A extração não pôde ser feita (texto ilegível, provedor indisponível, resposta inválida).
 
-    def __init__(self, mensagem: str, status: int = 422) -> None:
+    ``causa`` é o código gravado nas métricas da execução que falhou (``texto_ilegivel`` ou
+    ``json_invalido``; as causas do provedor estão em ``ErroProvedor``)."""
+
+    def __init__(self, mensagem: str, status: int = 422, causa: str = "texto_ilegivel") -> None:
         super().__init__(mensagem)
         self.status = status
+        self.causa = causa
 
 
 @dataclass
@@ -361,6 +371,9 @@ class Verificacao:
     recebidos: int = 0
     # Aceitos cujo trecho só foi achado na segunda busca (quebra de linha sem espaço no trecho).
     com_quebra_de_linha: int = 0
+    # Itens válidos iguais a um já aceito (mesmo tipo, valor e posição): não viram sugestão nem
+    # recusa. Com eles o total fecha: recebidos = aceitos + recusas + duplicatas.
+    duplicatas: int = 0
 
 
 def _recusa(motivo: str, bruto: object) -> dict:
@@ -416,6 +429,7 @@ def verificar_itens(texto: str, brutos: list, verificacao: Verificacao, max_iten
             continue
         marca = (item.tipo, item.valor, posicao)
         if marca in vistos:
+            verificacao.duplicatas += 1
             continue
         if len(verificacao.aceitos) >= max_itens:
             verificacao.recusas.append(_recusa("acima_do_limite_de_itens", bruto))
@@ -423,6 +437,40 @@ def verificar_itens(texto: str, brutos: list, verificacao: Verificacao, max_iten
         vistos.add(marca)
         verificacao.aceitos.append((item, posicao, fim))
         verificacao.com_quebra_de_linha += so_com_quebra
+
+
+def _ms(desde: float) -> int:
+    """Milissegundos de relógio monotônico decorridos desde ``desde``."""
+    return round((time.monotonic() - desde) * 1000)
+
+
+def _soma(blocos: list[dict], campo: str) -> int:
+    valores = ((b.get("metricas") or {}).get(campo) for b in blocos)
+    return sum(v for v in valores if isinstance(v, int) and not isinstance(v, bool))
+
+
+def resumir_metricas(
+    blocos: list[dict], duracao_ms: int, num_ctx_efetivo: int | None, falha: dict | None = None
+) -> dict:
+    """As métricas de uma execução: totais, registros por bloco e avisos.
+
+    ``saida_cortada`` avisa que o servidor parou a geração de um bloco pelo limite de tokens
+    (``done_reason == "length"``): a resposta desse bloco pode estar incompleta."""
+    cortados = [
+        b["numero"] for b in blocos if (b.get("metricas") or {}).get("done_reason") == "length"
+    ]
+    metricas: dict = {
+        "duracao_ms": duracao_ms,
+        "tokens_entrada": _soma(blocos, "prompt_eval_count"),
+        "tokens_saida": _soma(blocos, "eval_count"),
+        "num_ctx_efetivo": num_ctx_efetivo,
+        "blocos": blocos[:MAX_BLOCOS_METRICAS],
+        "blocos_omitidos": max(0, len(blocos) - MAX_BLOCOS_METRICAS),
+        "avisos": [{"tipo": "saida_cortada", "blocos": cortados}] if cortados else [],
+    }
+    if falha is not None:
+        metricas["falha"] = falha
+    return metricas
 
 
 def executar(
@@ -440,7 +488,16 @@ def executar(
     """Roda a extração sobre a captura e grava a execução e as sugestões pendentes.
 
     Em caso de falha (provedor ou resposta fora do formato), a execução fica gravada como
-    ``falha``, com o motivo, e nenhuma sugestão é criada."""
+    ``falha``, com o motivo, e nenhuma sugestão é criada. As métricas da falha dizem em que
+    bloco ela ocorreu, a causa e o tempo e os tokens já gastos."""
+    inicio = time.monotonic()
+    medidos: list[dict] = []
+    bloco_atual: int | None = None
+
+    def janela_em_uso() -> int | None:
+        # Só depois de alguma geração: é quando o modelo está carregado no servidor.
+        return provedor.contexto_efetivo() if any("metricas" in b for b in medidos) else None
+
     extracao = ExtracaoIA(
         caso_id=captura.caso_id,
         captura_id=captura.id,
@@ -463,6 +520,16 @@ def executar(
         blocos = dividir_em_blocos(texto.conteudo, tamanho_bloco)
         extracao.parametros = {
             **provedor.parametros(),
+            # Quantização e tamanho do modelo, quando o servidor informa.
+            **(
+                {
+                    "modelo_quantizacao": identidade.quantizacao,
+                    "modelo_tamanho_parametros": identidade.tamanho_parametros,
+                    "modelo_tamanho_bytes": identidade.tamanho_bytes,
+                }
+                if identidade.quantizacao or identidade.tamanho_parametros
+                else {}
+            ),
             "tamanho_bloco": tamanho_bloco,
             "max_caracteres": max_caracteres,
             "texto_truncado": texto.truncado,
@@ -482,21 +549,46 @@ def executar(
         }
         extracao.blocos = len(blocos)
         for numero, bloco in enumerate(blocos, start=1):
-            bruto = provedor.gerar(INSTRUCOES, bloco, ESQUEMA_RESPOSTA)
+            bloco_atual = numero
+            medido: dict = {"numero": numero, "caracteres": len(bloco)}
+            medidos.append(medido)
+            antes = time.monotonic()
             try:
-                resposta = RespostaDoModelo.model_validate(carregar_json_estrito(bruto))
+                geracao = provedor.gerar(INSTRUCOES, bloco, ESQUEMA_RESPOSTA)
+            finally:
+                # Vale também para o bloco que falhou: é o tempo gasto até a falha.
+                medido["duracao_parede_ms"] = _ms(antes)
+            medido["metricas"] = dict(geracao.metricas)
+            try:
+                resposta = RespostaDoModelo.model_validate(carregar_json_estrito(geracao.texto))
             except (ValueError, ValidationError) as erro:
                 raise ErroExtracao(
                     f"A resposta do modelo para o bloco {numero} não é JSON no esquema esperado; "
                     "nenhuma sugestão foi criada.",
                     502,
+                    "json_invalido",
                 ) from erro
+            recebidos, aceitos = verificacao.recebidos, len(verificacao.aceitos)
+            recusados, duplicatas = len(verificacao.recusas), verificacao.duplicatas
             verificar_itens(texto.conteudo, resposta.itens, verificacao, max_itens)
+            medido["itens_recebidos"] = verificacao.recebidos - recebidos
+            medido["itens_aceitos"] = len(verificacao.aceitos) - aceitos
+            medido["itens_recusados"] = len(verificacao.recusas) - recusados
+            medido["duplicatas_descartadas"] = verificacao.duplicatas - duplicatas
     except (ErroProvedor, ErroExtracao) as erro:
         extracao.situacao = "falha"
         extracao.motivo = texto_de_linha(erro)[:400]
         extracao.concluido_em = iso_utc()
         extracao.itens_recebidos = verificacao.recebidos
+        duracao_ms = _ms(inicio)
+        extracao.metricas = resumir_metricas(
+            medidos,
+            duracao_ms,
+            janela_em_uso(),
+            # ``bloco`` é ``None`` quando a falha veio antes do primeiro bloco (texto ilegível
+            # ou modelo recusado). Os tokens já gastos estão nos totais.
+            falha={"bloco": bloco_atual, "causa": erro.causa, "duracao_ms": duracao_ms},
+        )
         sessao.flush()
         return extracao
     for item, posicao, fim in verificacao.aceitos:
@@ -523,7 +615,9 @@ def executar(
     extracao.parametros = {
         **extracao.parametros,
         "trechos_localizados_com_quebra_de_linha": verificacao.com_quebra_de_linha,
+        "duplicatas_descartadas": verificacao.duplicatas,
     }
+    extracao.metricas = resumir_metricas(medidos, _ms(inicio), janela_em_uso())
     extracao.itens_recebidos = verificacao.recebidos
     extracao.itens_aceitos = len(verificacao.aceitos)
     extracao.itens_recusados = len(verificacao.recusas)

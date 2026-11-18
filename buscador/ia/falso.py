@@ -3,7 +3,9 @@
 Por padrão ele "extrai" por expressões regulares os CNPJs e os valores em reais do bloco e cita a
 linha em que cada um aparece: serve para demonstrar o fluxo (execução, sugestões, revisão) sem
 instalar um modelo. Nos testes, ``respostas`` substitui esse comportamento por respostas prontas,
-inclusive inválidas ou com trecho inventado, para provar que o serviço as recusa.
+inclusive inválidas ou com trecho inventado, para provar que o serviço as recusa. Ele não mede
+nada: as métricas saem vazias, a não ser as fixas passadas em ``metricas`` (um dicionário para
+todas as chamadas ou uma lista, uma por chamada).
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import json
 import re
 from collections.abc import Callable
 
-from buscador.ia.provedor import Identidade
+from buscador.ia.provedor import Geracao, Identidade
 
 # CNPJ pontuado, numérico ou alfanumérico (12 posições com dígitos ou letras de A a Z + 2 DVs).
 _CNPJ = re.compile(
@@ -29,8 +31,12 @@ class ProvedorFalso:
         respostas: Callable[[str], str] | list[str] | None = None,
         modelo: str = "modelo-falso",
         versao: str = "falso-1",
+        metricas: dict | list[dict] | None = None,
+        contexto: int | None = None,
     ) -> None:
         self._respostas = respostas
+        self._metricas = metricas
+        self._contexto = contexto
         self._modelo = modelo
         self._versao = versao
         self.blocos_recebidos: list[str] = []
@@ -41,8 +47,21 @@ class ProvedorFalso:
     def parametros(self) -> dict:
         return {"temperature": 0, "seed": 0, "deterministico": True}
 
-    def gerar(self, instrucoes: str, texto: str, esquema: dict) -> str:
+    def contexto_efetivo(self) -> int | None:
+        return self._contexto
+
+    def _metricas_da_chamada(self) -> dict:
+        if isinstance(self._metricas, list):
+            if not self._metricas:
+                return {}
+            return dict(self._metricas[min(len(self.blocos_recebidos), len(self._metricas)) - 1])
+        return dict(self._metricas or {})
+
+    def gerar(self, instrucoes: str, texto: str, esquema: dict) -> Geracao:
         self.blocos_recebidos.append(texto)
+        return Geracao(self._texto(texto), self._metricas_da_chamada())
+
+    def _texto(self, texto: str) -> str:
         if callable(self._respostas):
             return self._respostas(texto)
         if isinstance(self._respostas, list):

@@ -243,6 +243,8 @@ class ExtracaoIaSaida(BaseModel):
     itens_aceitos: int
     itens_recusados: int
     recusas: list[RecusaIa]
+    # Tempos e tokens medidos (por bloco e no total); ``None`` em execução antiga.
+    metricas: dict[str, Any] | None = None
     usuario: str
     iniciado_em: str
     concluido_em: str | None

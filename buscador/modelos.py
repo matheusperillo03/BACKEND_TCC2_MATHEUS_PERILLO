@@ -442,6 +442,9 @@ class ExtracaoIA(Base):
     itens_recusados: Mapped[int] = mapped_column(Integer, default=0)
     # Uma linha por item recusado: motivo e resumo do item (o trecho inventado fica registrado).
     recusas: Mapped[list] = mapped_column(JSON, default=list)
+    # O que foi MEDIDO na execução (tempos, tokens, por bloco e no total; a falha, se houve).
+    # Só números e códigos, nunca texto do documento. Nulo nas execuções anteriores à coluna.
+    metricas: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     usuario: Mapped[str] = mapped_column(String(100))
     iniciado_em: Mapped[str] = mapped_column(String(40), default=iso_utc)
     concluido_em: Mapped[str | None] = mapped_column(String(40), nullable=True)

@@ -99,6 +99,9 @@ class Configuracao(BaseSettings):
     # serviço no Docker Compose), separados por vírgula.
     ia_hosts_locais: str = ""
     ia_timeout_segundos: float = Field(default=120.0, gt=0, le=3600)
+    # Tempo que o Ollama mantém o modelo carregado depois da chamada ("5m", "1h", "0", "-1").
+    # Vazio (o padrão): o campo não é enviado e vale o padrão do servidor.
+    ia_keep_alive: str = Field(default="", pattern=r"^\s*(-?\d+|-?(\d+(ms|s|m|h))+)?\s*$")
     ia_max_caracteres: int = Field(default=200_000, ge=1_000, le=5_000_000)
     ia_tamanho_bloco: int = Field(default=6_000, ge=200, le=100_000)
     ia_max_itens: int = Field(default=300, ge=1, le=5_000)

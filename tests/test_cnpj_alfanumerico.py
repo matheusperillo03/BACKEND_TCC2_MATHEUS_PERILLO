@@ -409,7 +409,7 @@ def test_extracao_por_ia_reconhece_e_ampara_cnpj_alfanumerico():
     texto = (
         f"Contratada: LETRAS SINTETICA LTDA, CNPJ {cnpj_formatado(cnpj)}, com sede em Exemplo.\n"
     )
-    itens = json.loads(ProvedorFalso().gerar("", texto, {}))["itens"]
+    itens = json.loads(ProvedorFalso().gerar("", texto, {}).texto)["itens"]
     assert [i["campos"]["cnpj"] for i in itens if i["tipo"] == "empresa"] == [cnpj_formatado(cnpj)]
     verificacao = ia.Verificacao()
     ia.verificar_itens(texto, itens, verificacao, 10)
