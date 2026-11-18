@@ -10,14 +10,19 @@ Regras (RF13, RNF05, H22), aplicadas a QUALQUER provedor:
    única equivalência é a de espaços em branco: uma sequência de espaço, tabulação, quebra de
    linha (``\n``, ``\r``) ou espaço não separável (NBSP) vale um espaço, porque o modelo costuma
    devolver com espaço simples o texto que no documento está quebrado em duas linhas. Nenhum
-   espaço é criado nem removido: palavras separadas no documento não casam com palavras juntas
-   no trecho, nem o contrário. O que se grava é o recorte do texto ORIGINAL (com as quebras de
-   linha dele) e as posições desse recorte. Item com trecho que não está no texto é recusado e
-   fica registrado na execução, com o motivo.
+   espaço é criado nem removido nessa primeira busca. Se ela falha, uma segunda busca compara
+   os dois lados SEM os espaços em branco (decisão do autor, piloto de 18/11/2026): a extração
+   de texto de PDF quebra a linha no meio de expressões ("Nº 02", "/", "2026" em três linhas;
+   "(" e ")" separados do número; "Valor" e ":" em linhas diferentes), e o modelo devolve o
+   texto corrido. Todo caractere que não é espaço continua exigido, igual e na mesma ordem. O
+   que se grava é o recorte do texto ORIGINAL (com as quebras de linha dele) e as posições
+   desse recorte; a execução conta quantos trechos só foram achados na segunda busca. Item com
+   trecho que não está no texto é recusado e fica registrado na execução, com o motivo.
 3. **Valor amparado no trecho.** O valor extraído (e cada campo, como o CNPJ) precisa aparecer
    dentro do próprio trecho citado, com a mesma equivalência de espaços em branco (e ignorando
-   maiúsculas, acentos e pontuação; para CNPJ e CPF, comparando os dígitos). Um trecho
-   verdadeiro não serve de álibi para um valor inventado.
+   maiúsculas, acentos e pontuação; para CNPJ e CPF, comparando os dígitos) e, se preciso, a
+   mesma segunda comparação sem espaços. Um trecho verdadeiro não serve de álibi para um valor
+   inventado.
 4. **Rastro.** Cada execução grava provedor, modelo, versão (resumo do modelo e versão do
    servidor), parâmetros, SHA-256 do prompt e SHA-256 da captura analisada.
 5. **Decisão humana.** O item aceito pelas verificações vira SUGESTÃO pendente. Só a decisão do
@@ -33,6 +38,7 @@ import hashlib
 import json
 import unicodedata
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -203,6 +209,13 @@ class TextoNormalizado:
         """Intervalo, no original, de ``tamanho`` caracteres normalizados desde ``posicao``."""
         return self.inicios[posicao], self.fins[posicao + tamanho - 1]
 
+    @cached_property
+    def sem_espacos(self) -> tuple[str, tuple[int, ...]]:
+        """O texto sem os espaços em branco e, para cada caractere dele, o índice no texto
+        normalizado (de onde ``inicios`` e ``fins`` levam ao original)."""
+        indices = tuple(i for i, c in enumerate(self.texto) if c != " ")
+        return "".join(self.texto[i] for i in indices), indices
+
 
 def normalizar_espacos(texto: str) -> TextoNormalizado:
     """Reduz cada sequência de espaços em branco a UM espaço, sem mexer em mais nada.
@@ -241,6 +254,23 @@ def localizar_trecho(original: TextoNormalizado, trecho: str) -> tuple[int, int]
     return original.intervalo_original(posicao, len(alvo))
 
 
+def localizar_trecho_sem_espacos(original: TextoNormalizado, trecho: str) -> tuple[int, int] | None:
+    """Segunda busca: o trecho comparado com o texto SEM os espaços em branco dos dois lados.
+
+    Serve para o texto de PDF, em que a extração põe quebras de linha no meio de expressões
+    que o modelo devolve corridas. Os caracteres que não são espaço têm de ser os mesmos, na
+    mesma ordem e seguidos. O intervalo devolvido é o do texto original, do primeiro ao último
+    caractere casado, com os espaços e quebras que o documento tem entre eles."""
+    alvo = normalizar_espacos(trecho).texto.replace(" ", "")
+    if len(alvo) < MIN_TRECHO:
+        return None
+    compacto, indices = original.sem_espacos
+    posicao = compacto.find(alvo)
+    if posicao < 0:
+        return None
+    return original.inicios[indices[posicao]], original.fins[indices[posicao + len(alvo) - 1]]
+
+
 def _comparavel(texto: str) -> str:
     """Forma de comparação do valor com o trecho: sem acentos, sem pontuação, minúsculas e com
     os espaços em branco reduzidos (toda sequência de ``ESPACOS_EQUIVALENTES`` vira um espaço)."""
@@ -262,7 +292,11 @@ def _amparado(
         digitos = somente_digitos(valor)
         return bool(digitos) and digitos in somente_digitos(trecho)
     alvo = _comparavel(valor)
-    return bool(alvo) and alvo in _comparavel(trecho)
+    if not alvo:
+        return False
+    citado = _comparavel(trecho)
+    # Segunda comparação sem espaços: a quebra de linha do PDF pode cair dentro do valor.
+    return alvo in citado or alvo.replace(" ", "") in citado.replace(" ", "")
 
 
 @dataclass
@@ -271,6 +305,8 @@ class Verificacao:
     aceitos: list[tuple[ItemExtraido, int, int]] = field(default_factory=list)
     recusas: list[dict] = field(default_factory=list)
     recebidos: int = 0
+    # Aceitos cujo trecho só foi achado na segunda busca (sem os espaços em branco).
+    sem_espacos: int = 0
 
 
 def _recusa(motivo: str, bruto: object) -> dict:
@@ -303,6 +339,9 @@ def verificar_itens(texto: str, brutos: list, verificacao: Verificacao, max_iten
             verificacao.recusas.append(_recusa("trecho_vazio", bruto))
             continue
         intervalo = localizar_trecho(normalizado, item.trecho)
+        so_sem_espacos = intervalo is None
+        if so_sem_espacos:
+            intervalo = localizar_trecho_sem_espacos(normalizado, item.trecho)
         if intervalo is None:
             verificacao.recusas.append(_recusa("trecho_nao_literal", bruto))
             continue
@@ -329,6 +368,7 @@ def verificar_itens(texto: str, brutos: list, verificacao: Verificacao, max_iten
             continue
         vistos.add(marca)
         verificacao.aceitos.append((item, posicao, fim))
+        verificacao.sem_espacos += so_sem_espacos
 
 
 def executar(
@@ -426,6 +466,10 @@ def executar(
             )
         )
     extracao.situacao = "sucesso"
+    extracao.parametros = {
+        **extracao.parametros,
+        "trechos_localizados_sem_espacos": verificacao.sem_espacos,
+    }
     extracao.itens_recebidos = verificacao.recebidos
     extracao.itens_aceitos = len(verificacao.aceitos)
     extracao.itens_recusados = len(verificacao.recusas)

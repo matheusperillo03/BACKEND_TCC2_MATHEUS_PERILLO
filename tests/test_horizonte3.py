@@ -1687,21 +1687,135 @@ def test_h22_letra_acento_caixa_e_pontuacao_continuam_exigindo_igualdade(trecho)
     assert [r["motivo"] for r in verificacao.recusas] == ["trecho_nao_literal"]
 
 
+# Como a extração de texto de PDF entrega um ato (sintético): a linha quebra no meio de expressões,
+# em volta de pontuação e até dentro de uma palavra (piloto de 18/11/2026).
+ATO_DE_PDF = "\n".join(
+    [
+        "AUTORIZAÇÃO DA DISPENSA SINTÉTICA Nº 07",
+        "/",
+        "2026",
+        " ",
+        "1 . ",
+        "APROVO",
+        " o Termo de Referência sintético 12 (",
+        "900000001",
+        "), para fins de teste.",
+        "Empresa: ",
+        "FORNECEDORA SINTETICA DE EXEMPLO LTDA",
+        "Taxa Sintética",
+        ": ",
+        "R$ ",
+        "1.234,56 (valor sintético)",
+        "O",
+        "bjeto",
+        ": ",
+        "serviço sintético de exemplo.",
+        "",
+    ]
+)
+
+
+@pytest.mark.parametrize(
+    ("tipo", "valor", "trecho_do_modelo", "recorte_original"),
+    [
+        (
+            "objeto",
+            "07/2026",
+            "AUTORIZAÇÃO DA DISPENSA SINTÉTICA Nº 07/2026",
+            "AUTORIZAÇÃO DA DISPENSA SINTÉTICA Nº 07\n/\n2026",
+        ),
+        (
+            "objeto",
+            "Termo de Referência sintético 12",
+            "1. APROVO o Termo de Referência sintético 12 (900000001), para fins de teste.",
+            "1 . \nAPROVO\n o Termo de Referência sintético 12 (\n900000001\n), para fins de teste.",
+        ),
+        (
+            "valor",
+            "R$ 1.234,56",
+            "Taxa Sintética: R$ 1.234,56",
+            "Taxa Sintética\n: \nR$ \n1.234,56",
+        ),
+        # A quebra cai dentro da palavra, que é também o valor extraído.
+        ("objeto", "Objeto", "Objeto: serviço sintético", "O\nbjeto\n: \nserviço sintético"),
+        # O contrário: o modelo põe um espaço que o documento não tem.
+        ("valor", "1.234,56", "R$ 1.234, 56 (valor sintético)", "R$ \n1.234,56 (valor sintético)"),
+    ],
+)
+def test_h22_trecho_quebrado_pela_extracao_do_pdf_e_achado_sem_os_espacos(
+    tipo, valor, trecho_do_modelo, recorte_original
+):
+    item = {"tipo": tipo, "valor": valor, "trecho": trecho_do_modelo}
+    # A busca com um espaço por sequência não acha: o documento tem espaço onde o modelo não tem.
+    normalizado = ia.normalizar_espacos(ATO_DE_PDF)
+    assert ia.localizar_trecho(normalizado, trecho_do_modelo) is None
+    verificacao = _verificar(ATO_DE_PDF, item)
+    assert verificacao.recusas == []
+    ((_, inicio, fim),) = verificacao.aceitos
+    # As posições são as do texto original: o destaque cobre o recorte com as quebras dele.
+    assert ATO_DE_PDF[inicio:fim] == recorte_original
+    assert inicio == ATO_DE_PDF.index(recorte_original)
+    assert verificacao.sem_espacos == 1
+
+
+def test_h22_busca_sem_espacos_nao_e_contada_quando_a_primeira_busca_acha():
+    item = {
+        "tipo": "empresa",
+        "valor": "FORNECEDORA SINTETICA DE EXEMPLO LTDA",
+        "trecho": "Empresa: FORNECEDORA SINTETICA DE EXEMPLO LTDA",
+    }
+    verificacao = _verificar(ATO_DE_PDF, item)
+    assert verificacao.recusas == [] and verificacao.sem_espacos == 0
+    ((_, inicio, fim),) = verificacao.aceitos
+    assert ATO_DE_PDF[inicio:fim] == "Empresa: \nFORNECEDORA SINTETICA DE EXEMPLO LTDA"
+
+
 @pytest.mark.parametrize(
     "trecho",
     [
-        "Certidão deQuitação",  # palavras separadas por quebra de linha no documento
-        "Certidão de\nQuitaçãojunto ao conselho",  # separadas por um espaço
-        "Será exigida,ainda",
-        "PREFEITURA SINTETICA DE EXEMPLO POLIS",  # o contrário: espaço que o documento não tem
-        "R$ 1.234.567, 89",
+        "AUTORIZAÇÃO DA DISPENSA SINTÉTICA Nº 08/2026",  # número que o documento não tem
+        "Taxa Sintética: R$ 1.234,57",  # valor trocado
+        "Empresa: FORNECEDORA SINTETICA DE EXEMPLO SA",  # palavra trocada
+        "Taxa Sintética R$ 1.234,56",  # pontuação removida
+        "Objeto: servico sintético",  # acento que falta
+        "objeto: serviço sintético",  # maiúscula trocada
+        "APROVO para fins de teste.",  # pedaços verdadeiros, mas não seguidos no documento
     ],
 )
-def test_h22_espaco_nao_e_criado_nem_removido_para_o_trecho_casar(trecho):
+def test_h22_busca_sem_espacos_continua_recusando_o_que_nao_esta_no_documento(trecho):
     item = {"tipo": "objeto", "valor": trecho.split()[0], "trecho": trecho}
-    verificacao = _verificar(EDITAL_QUEBRADO, item)
+    verificacao = _verificar(ATO_DE_PDF, item)
     assert verificacao.aceitos == []
     assert [r["motivo"] for r in verificacao.recusas] == ["trecho_nao_literal"]
+
+
+def test_h22_execucao_conta_os_trechos_achados_so_sem_os_espacos(tmp_path):
+    corrido = {"tipo": "valor", "valor": "R$ 1.234,56", "trecho": "Taxa Sintética: R$ 1.234,56"}
+    direto = {
+        "tipo": "empresa",
+        "valor": "FORNECEDORA SINTETICA DE EXEMPLO LTDA",
+        "trecho": "Empresa: FORNECEDORA SINTETICA DE EXEMPLO LTDA",
+    }
+    inventado = {"tipo": "valor", "valor": "R$ 9.999,99", "trecho": "Taxa Sintética: R$ 9.999,99"}
+    app = _app_ia(tmp_path, ProvedorFalso(lambda _bloco: _resposta(corrido, direto, inventado)))
+    (tmp_path / "editais_base" / "pregao9" / "edital9.txt").write_text(
+        ATO_DE_PDF, encoding="utf-8", newline=""
+    )
+    with TestClient(app) as cliente:
+        caso_id, captura_id = _caso_com_edital(cliente)
+        extracao = _extrair(cliente, caso_id, captura_id).json()
+        assert (extracao["itens_recebidos"], extracao["itens_aceitos"]) == (3, 2)
+        assert [x["motivo"] for x in extracao["recusas"]] == ["trecho_nao_literal"]
+        assert extracao["parametros"]["trechos_localizados_sem_espacos"] == 1
+        texto = cliente.get(f"/casos/{caso_id}/capturas/{captura_id}/texto", headers=H_ANA).json()
+        sugestoes = cliente.get(f"/casos/{caso_id}/sugestoes-ia", headers=H_ANA).json()
+        assert len(sugestoes) == 2
+        for sugestao in sugestoes:
+            assert (
+                texto["texto"][sugestao["posicao_inicio"] : sugestao["posicao_fim"]]
+                == sugestao["trecho"]
+            )
+        assert "Taxa Sintética\n: \nR$ \n1.234,56" in [x["trecho"] for x in sugestoes]
 
 
 def test_h22_valor_amparado_no_trecho_usa_a_mesma_normalizacao_de_espacos():
@@ -1718,8 +1832,11 @@ def test_h22_valor_amparado_no_trecho_usa_a_mesma_normalizacao_de_espacos():
     for valor in ("Certidão de\nQuitação", "Certidão\tde Quitação"):
         verificacao = _verificar(EDITAL_QUEBRADO, item(valor))
         assert [r["motivo"] for r in verificacao.recusas] == ["caractere_de_controle"], valor
-    # Juntar ou trocar palavras não é amparo.
-    for valor in ("Certidão deQuitação", "Certidão de Quitaçao municipal", "Certidão Negativa"):
+    # Só a falta do espaço não tira o amparo (a quebra de linha do PDF pode cair dentro do valor).
+    verificacao = _verificar(EDITAL_QUEBRADO, item("Certidão deQuitação"))
+    assert len(verificacao.aceitos) == 1 and verificacao.recusas == []
+    # Trocar ou acrescentar palavras não é amparo.
+    for valor in ("Certidão de Quitaçao municipal", "Certidão Negativa", "Quitação Certidão"):
         verificacao = _verificar(EDITAL_QUEBRADO, item(valor))
         assert verificacao.aceitos == [], valor
         assert [r["motivo"] for r in verificacao.recusas] == ["valor_fora_do_trecho"], valor
