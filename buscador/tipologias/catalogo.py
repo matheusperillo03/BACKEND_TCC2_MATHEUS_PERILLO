@@ -157,7 +157,8 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
         "H44",
         "Contratada em que nenhum sócio atual entrou até X dias depois do início da atividade e "
         "a entrada mais recente é anterior em até Y meses a um contrato (retrato único do "
-        "quadro).",
+        "quadro). Só contam as qualificações de sócio ou titular; não avalia administração "
+        "pública (grupo 1xxx), empresa pública (2011) nem sociedade de economia mista (2038).",
         _GAFI_EGMONT + ", item 7. Limiares: decisão do autor.",
         ["cnpj_arquivo", "pncp"],
         ["l7_dias_apos_abertura", "l7_meses_antes_contrato"],
