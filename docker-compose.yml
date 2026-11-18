@@ -47,6 +47,21 @@ services:
       IA_OLLAMA_URL: ${IA_OLLAMA_URL:-http://127.0.0.1:11434}
       IA_MODELO: ${IA_MODELO:-}
       IA_HOSTS_LOCAIS: ${IA_HOSTS_LOCAIS:-}
+      IA_KEEP_ALIVE: ${IA_KEEP_ALIVE:-}
+      # Extracao em segundo plano: janela, teto de saida, blocos (em tokens estimados) e limites
+      # por bloco. Um documento por vez; o trabalhador roda dentro da API.
+      IA_TRABALHADOR_ATIVO: ${IA_TRABALHADOR_ATIVO:-1}
+      IA_NUM_CTX: ${IA_NUM_CTX:-8192}
+      IA_NUM_PREDICT: ${IA_NUM_PREDICT:-2048}
+      IA_BLOCO_TOKENS: ${IA_BLOCO_TOKENS:-700}
+      IA_SOBREPOSICAO_TOKENS: ${IA_SOBREPOSICAO_TOKENS:-40}
+      IA_CARACTERES_POR_TOKEN: ${IA_CARACTERES_POR_TOKEN:-3.0}
+      IA_BLOCO_TEMPO_SEGUNDOS: ${IA_BLOCO_TEMPO_SEGUNDOS:-600}
+      IA_SEM_TOKEN_SEGUNDOS: ${IA_SEM_TOKEN_SEGUNDOS:-120}
+      IA_REPETICOES: ${IA_REPETICOES:-2}
+      IA_ESPERA_REPETICAO_SEGUNDOS: ${IA_ESPERA_REPETICAO_SEGUNDOS:-5}
+      IA_MAX_DIVISOES: ${IA_MAX_DIVISOES:-3}
+      IA_FALHAS_SEGUIDAS_MAX: ${IA_FALHAS_SEGUIDAS_MAX:-3}
       CORS_ORIGENS: ${CORS_ORIGENS:-http://localhost:5190,http://localhost:8090}
       CNPJ_DIR_BASE: ${CNPJ_DIR_BASE:-/app/tests/fixtures}
       PNCP_URL_BASE: ${PNCP_URL_BASE:-https://pncp.gov.br/api/consulta}
