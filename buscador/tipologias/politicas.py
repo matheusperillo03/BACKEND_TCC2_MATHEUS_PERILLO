@@ -238,10 +238,12 @@ POLITICAS: dict[str, Politica] = {
         politica_erro=(
             "Prefere evitar falso positivo: compara o valor contratado no ano com o limite LEGAL "
             "de receita do regime (MEI, microempresa ou pequeno porte), usa o valor inicial do "
-            "contrato, só conta como MEI os contratos assinados enquanto a opção valia e aplica "
-            "a tolerância da transição de limite. Ainda há falso positivo: contrato plurianual "
-            "não é receita de um ano, e o porte do cadastro é o atual. Aceita falso negativo: "
-            "empresa sem a tabela Simples coletada só é avaliada pelo porte."
+            "contrato e só conta como MEI os contratos assinados enquanto a opção valia. O "
+            "limite é o do ano-calendário, proporcional aos meses no ano de início de atividade "
+            "(LC nº 123/2006, art. 3º, § 2º, e art. 18-A, § 2º), sem tolerância: a lei não a "
+            "prevê. Ainda há falso positivo: contrato plurianual não é receita de um ano, e o "
+            "porte do cadastro é o atual. Aceita falso negativo: empresa sem a tabela Simples "
+            "coletada só é avaliada pelo porte, e contratos anteriores a 2012 não são avaliados."
         ),
     ),
     "L7": Politica(
