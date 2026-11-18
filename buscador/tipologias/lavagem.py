@@ -82,6 +82,27 @@ FAIXAS_ATIPICAS = ("1", "2", "9")
 # Organização Social (OS) e 3999 Associação Privada. A escolha das três é decisão do autor.
 NATUREZAS_SEM_FINS_LUCRATIVOS = ("3069", "3301", "3999")
 
+# L7 (decisão do autor, depois do piloto com dados reais de 18/11/2026). O quadro dos dados abertos
+# mistura sócios e administradores sem participação: em empresa pública, os "sócios" são diretores
+# e o presidente, trocados a cada gestão. Por isso a regra:
+# (a) não avalia naturezas jurídicas da administração pública (grupo 1xxx da tabela de domínio
+#     Naturezas, arquivo de 11/2026) nem 2011 Empresa Pública e 2038 Sociedade de Economia Mista;
+# (b) considera só as qualificações de sócio ou titular (tabela Qualificações, arquivo de 11/2026):
+#     22 Sócio, 23 Sócio Capitalista, 24 Sócio Comanditado, 25 Sócio Comanditário, 26 Sócio de
+#     Indústria, 28 Sócio-Gerente, 29 Sócio Incapaz, 30 Sócio Menor, 31 Sócio Ostensivo, 34 Titular
+#     de Empresa Individual Imobiliária, 37 e 38 Sócio no Exterior (PJ e PF), 47 e 48 Sócio no
+#     Brasil (PF e PJ), 49 Sócio-Administrador, 50 Empresário, 52 Sócio com Capital, 53 Sócio sem
+#     Capital, 55 a 58 Sócio Comanditado ou Comanditário (exterior, incapaz), 65 a 68 Titular
+#     Pessoa Física, 74 Sócio-Administrador no Exterior, 78 e 79 Titular Pessoa Jurídica.
+#     Ficam de fora os administradores sem participação (05, 08, 10, 16 e outros).
+L7_GRUPO_ADMINISTRACAO_PUBLICA = "1"
+L7_NATUREZAS_ESTATAIS = ("2011", "2038")
+L7_QUALIFICACOES_SOCIO = (
+    "22", "23", "24", "25", "26", "28", "29", "30", "31", "34", "37", "38", "47", "48", "49",
+    "50", "52", "53", "55", "56", "57", "58", "65", "66", "67", "68", "74", "78", "79",
+)  # fmt: skip
+QUALIFICACAO_NAO_INFORMADA = "00"
+
 # Identificador de sócio (metadados do CNPJ): 1 pessoa jurídica, 2 pessoa física, 3 estrangeiro.
 SOCIO_PJ, SOCIO_PF, SOCIO_ESTRANGEIRO = "1", "2", "3"
 
@@ -186,6 +207,15 @@ def _contratos_por_empresa(ctx: Contexto) -> dict[str, list[Entidade]]:
 
 def _qualificacao(aresta: Aresta) -> str:
     return str((aresta.atributos or {}).get("qualificacao_socio") or "").strip().zfill(2)
+
+
+def _natureza_estatal(empresa: Entidade) -> bool:
+    """Administração pública (grupo 1xxx), empresa pública ou sociedade de economia mista."""
+    natureza = str(_atr(empresa).get("natureza_juridica") or "").strip()
+    if not natureza.isdigit():
+        return False
+    natureza = natureza.zfill(4)
+    return natureza.startswith(L7_GRUPO_ADMINISTRACAO_PUBLICA) or natureza in L7_NATUREZAS_ESTATAIS
 
 
 def _identificador_socio(aresta: Aresta) -> str:
@@ -560,8 +590,24 @@ def tipologia_l7(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
     def regra(empresa_id: str) -> AlertaDetectado | None:
         empresa = ctx.entidades[empresa_id]
         inicio = _inicio(empresa)
-        socios = quadro.get(empresa_id, [])
-        if inicio is None or not socios:
+        # Empresa estatal: o quadro traz dirigentes de mandato, não sócios (decisão do autor).
+        if inicio is None or _natureza_estatal(empresa):
+            return None
+        quadro_atual = quadro.get(empresa_id, [])
+        # Sem a qualificação não se sabe se o registro é de sócio: a regra não afirma nada, e a
+        # execução avisa que a empresa ficou sem avaliação (decisão do autor).
+        sem_qualificacao = sum(
+            _qualificacao(a) == QUALIFICACAO_NAO_INFORMADA for _, a in quadro_atual
+        )
+        if sem_qualificacao:
+            ctx.avisos.append(
+                f"L7 não avaliada para {empresa.identificador or empresa.rotulo}: "
+                f"{sem_qualificacao} registro(s) do QSA sem qualificação."
+            )
+            return None
+        # Administrador sem participação (diretor, presidente) não é sócio nem fundador.
+        socios = [(s, a) for s, a in quadro_atual if _qualificacao(a) in L7_QUALIFICACOES_SOCIO]
+        if not socios:
             return None
         entradas = [_data((a.atributos or {}).get("data_entrada_sociedade")) for _, a in socios]
         # Sócio sem data de entrada pode ser fundador: sem a data, a regra não afirma nada.
@@ -598,7 +644,9 @@ def tipologia_l7(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
             f"recente, em {formatar_data(ultima.isoformat())}, é anterior em até {meses} meses a "
             f"{len(proximos)} contrato(s): {contratos_texto}. Pode indicar troca de sócios de "
             "fachada antes da contratação, mas também venda legítima da empresa ou sucessão. O "
-            "dado aberto traz só o quadro atual: quem saiu, e quando, não aparece. " + AVISO_PISTA
+            "dado aberto traz só o quadro atual: quem saiu, e quando, não aparece. Só contam as "
+            "qualificações de sócio ou titular; administradores sem participação ficam de fora. "
+            + AVISO_PISTA
         )
         est = next(iter(_estabelecimentos(empresa)), None)
         evidencias = []
@@ -632,6 +680,9 @@ def tipologia_l7(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
                 "primeira_entrada": min(entradas).isoformat(),
                 "ultima_entrada": ultima.isoformat(),
                 "contratos": len(proximos),
+                "socios_considerados": len(socios),
+                "administradores_sem_participacao": len(quadro_atual) - len(socios),
+                "natureza_juridica": str(_atr(empresa).get("natureza_juridica") or ""),
                 "parte": "a (retrato único)",
             },
         )

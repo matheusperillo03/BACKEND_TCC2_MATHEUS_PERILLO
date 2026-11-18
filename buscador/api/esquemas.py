@@ -108,6 +108,8 @@ class CasoSaida(BaseModel):
 
 class CasoDetalhe(CasoSaida):
     contagens: dict[str, int]
+    # O que a última execução de cada tipologia deixou de avaliar por falta de dado.
+    avisos_tipologias: list[str] = Field(default_factory=list)
 
 
 class ColetaEntrada(BaseModel):

@@ -53,6 +53,9 @@ class Caso(Base):
     # criados antes destas colunas ficam com finalidade vazia e sem prazo (``None``).
     finalidade: Mapped[str] = mapped_column(Text, default="", server_default="")
     retencao_ate: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Avisos da última execução de cada tipologia (código -> frases): o que a regra deixou de
+    # avaliar por falta de dado. Casos anteriores à coluna ficam com ``None``.
+    avisos_tipologias: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=dict)
 
 
 class Coleta(Base):

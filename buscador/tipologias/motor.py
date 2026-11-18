@@ -118,6 +118,9 @@ class Contexto:
     ler_captura: Callable[[Captura], bytes] | None = None
     # Limites da extração de texto de PDF (``None`` = padrões de ``LimitesPdf``).
     limites_pdf: LimitesPdf | None = None
+    # Avisos da execução: o que uma tipologia deixou de avaliar por falta de dado (frases
+    # curtas, sem dado pessoal). ``executar`` grava no caso, por tipologia.
+    avisos: list[str] = field(default_factory=list)
     _textos: dict[str, str | None] = field(default_factory=dict, repr=False)
 
     def texto_da_captura(self, captura_id: str) -> str | None:
@@ -675,6 +678,28 @@ def carregar_contexto(
     )
 
 
+MAX_AVISOS_POR_TIPOLOGIA = 100
+
+
+def _limitar_avisos(codigo: str, avisos: list[str]) -> list[str]:
+    """Sem repetição, na ordem, e no máximo ``MAX_AVISOS_POR_TIPOLOGIA`` (o resto é contado)."""
+    unicos = list(dict.fromkeys(avisos))
+    if len(unicos) <= MAX_AVISOS_POR_TIPOLOGIA:
+        return unicos
+    resto = len(unicos) - MAX_AVISOS_POR_TIPOLOGIA
+    return [*unicos[:MAX_AVISOS_POR_TIPOLOGIA], f"{codigo}: mais {resto} aviso(s) não listado(s)."]
+
+
+def avisos_do_caso(caso: Caso, codigos: list[str] | None = None) -> list[str]:
+    """Avisos gravados na última execução de cada tipologia (todas, ou só ``codigos``), na
+    ordem do catálogo."""
+    registrados = caso.avisos_tipologias or {}
+    escolhidos = registrados if codigos is None else [c for c in codigos if c in registrados]
+    return [
+        aviso for codigo in sorted(escolhidos, key=chave_do_codigo) for aviso in registrados[codigo]
+    ]
+
+
 def ordenar(alertas: list[Alerta]) -> list[Alerta]:
     """Ordem de apresentação (RF14): severidade (alta primeiro), tipologia e título. Alertas
     inativos (não detectados na última execução, mantidos pela decisão) vão para o fim."""
@@ -705,6 +730,10 @@ def executar(
 
     ``ler_captura`` dá acesso à carga bruta na custódia; sem ele, a T10 (texto de editais) não
     encontra nada.
+
+    O que uma tipologia deixou de avaliar por falta de dado (``Contexto.avisos``) é gravado em
+    ``Caso.avisos_tipologias``, por tipologia: cada execução substitui os avisos das tipologias
+    que rodou e não toca nos das outras.
     """
     pedidas = list(dict.fromkeys(tipologias or ordem_tipologias()))
     for nome in pedidas:
@@ -728,9 +757,17 @@ def executar(
     sessao.execute(select(Caso.id).where(Caso.id == caso_id).with_for_update())
     ctx = carregar_contexto(sessao, caso_id, ler_captura, limites_pdf)
     detectados: dict[str, AlertaDetectado] = {}
+    caso = sessao.get(Caso, caso_id)
+    avisos = dict((caso.avisos_tipologias if caso is not None else None) or {})
     for nome in pedidas:
+        antes = len(ctx.avisos)
         for d in TIPOLOGIAS[nome](ctx, parametros):
             detectados.setdefault(d.chave, d)
+        avisos.pop(nome, None)
+        if len(ctx.avisos) > antes:
+            avisos[nome] = _limitar_avisos(nome, ctx.avisos[antes:])
+    if caso is not None:
+        caso.avisos_tipologias = avisos
 
     alertas = _reconciliar(sessao, caso_id, pedidas, detectados, limiares)
     if combinar:

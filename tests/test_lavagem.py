@@ -275,6 +275,169 @@ def test_rf03_l7_limites_tolerancia_apos_a_abertura_e_janela_antes_do_contrato(c
     assert cenario.alertas("L7") == []
 
 
+def test_rf03_l7_nao_avalia_administracao_publica_nem_empresa_estatal(cenario):
+    # Piloto de 18/11/2026: em empresa pública, o quadro traz dirigentes de mandato, não sócios.
+    casos = [("1104", "AUTARQUIA"), ("2011", "EMPRESA PUBLICA"), ("2038", "ECONOMIA MISTA")]
+    for i, (natureza, nome) in enumerate(casos, start=1):
+        basico = f"9190001{i}"
+        cenario.empresa(
+            basico, f"{nome} SINTETICA", inicio="20200101", natureza=natureza, numero=f"1{i}"
+        )
+        # Qualificação de sócio de propósito: quem barra a regra aqui é a natureza jurídica.
+        cenario.socio(basico, f"DIRIGENTE {i} SINTETICO", f"***7{i}7{i}7{i}**", entrada="20260101")
+        cenario.contrato(basico, "2026-06-01")
+    assert cenario.alertas("L7") == []
+    # A mesma situação numa sociedade limitada (2062) continua a disparar.
+    _trocada(cenario, "20260101")
+    (alerta,) = cenario.alertas("L7")
+    assert alerta.parametros["natureza_juridica"] == "2062"
+
+
+def test_rf03_l7_so_conta_qualificacao_de_socio_ou_titular(cenario):
+    # Só diretor (10) e presidente (16), sem participação: não há sócio a avaliar.
+    cenario.empresa("91900021", "SO DIRETORIA SINTETICA SA", inicio="20200101", natureza="2054")
+    cenario.socio(
+        "91900021", "DIRETOR SINTETICO", "***818181**", qualificacao="10", entrada="20260101"
+    )
+    cenario.socio(
+        "91900021", "PRESIDENTE SINTETICO", "***828282**", qualificacao="16", entrada="20260101"
+    )
+    cenario.contrato("91900021", "2026-06-01")
+    assert cenario.alertas("L7") == []
+    # Sócio fundador (22) e diretor novo (10): a troca do diretor não é troca de sócio.
+    cenario.empresa("91900022", "DIRETOR NOVO SINTETICA LTDA", inicio="20200101", numero="22")
+    cenario.socio(
+        "91900022", "SOCIO FUNDADOR SINTETICO", "***838383**", qualificacao="22",
+        entrada="20200101",
+    )  # fmt: skip
+    cenario.socio(
+        "91900022", "DIRETOR NOVO SINTETICO", "***848484**", qualificacao="10", entrada="20260101"
+    )
+    cenario.contrato("91900022", "2026-06-01")
+    assert cenario.alertas("L7") == []
+    # Sócio novo (22) e diretor antigo (10): o diretor não conta como fundador, e a regra dispara.
+    cenario.empresa("91900023", "SOCIO NOVO SINTETICA LTDA", inicio="20200101", numero="23")
+    cenario.socio(
+        "91900023", "SOCIO NOVO SINTETICO", "***858585**", qualificacao="22", entrada="20260101"
+    )
+    cenario.socio(
+        "91900023", "DIRETOR ANTIGO SINTETICO", "***868686**", qualificacao="10",
+        entrada="20200101",
+    )  # fmt: skip
+    cenario.contrato("91900023", "2026-06-01")
+    (alerta,) = cenario.alertas("L7")
+    assert alerta.parametros["socios_considerados"] == 1
+    assert alerta.parametros["administradores_sem_participacao"] == 1
+    assert "DIRETOR ANTIGO SINTETICO" not in alerta.motivo
+    # Sem a qualificação de um registro do quadro, a regra não afirma nada.
+    cenario.empresa("91900024", "SEM QUALIFICACAO SINTETICA LTDA", inicio="20200101", numero="24")
+    cenario.socio(
+        "91900024", "SOCIO NOVO DOIS SINTETICO", "***878787**", qualificacao="22",
+        entrada="20260101",
+    )  # fmt: skip
+    cenario.socio(
+        "91900024", "SEM QUALIFICACAO SINTETICO", "***888888**", qualificacao="",
+        entrada="20260101",
+    )  # fmt: skip
+    cenario.contrato("91900024", "2026-06-01")
+    assert [a.entidades[0] for a in cenario.alertas("L7")] == [alerta.entidades[0]]
+
+
+def test_rf03_l7_avisa_quando_o_quadro_tem_registro_sem_qualificacao(cenario):
+    from buscador.modelos import Caso
+    from buscador.tipologias import avisos_do_caso
+
+    def avisos(*codigos):
+        cenario.sessao.flush()
+        cenario.sessao.expire_all()
+        return avisos_do_caso(cenario.sessao.get(Caso, cenario.caso_id), list(codigos) or None)
+
+    # Dois registros sem qualificação (vazia e 00 "Não informada") e um sócio novo (22).
+    cenario.empresa("91900031", "DOIS SEM QUALIFICACAO SINTETICA LTDA", inicio="20200101")
+    cenario.socio(
+        "91900031", "SOCIO NOVO TRES SINTETICO", "***111111**", qualificacao="22",
+        entrada="20260101",
+    )  # fmt: skip
+    cenario.socio(
+        "91900031", "SEM QUALIFICACAO UM SINTETICO", "***121212**", qualificacao="",
+        entrada="20260101",
+    )  # fmt: skip
+    cenario.socio(
+        "91900031", "SEM QUALIFICACAO DOIS SINTETICO", "***131313**", qualificacao="00",
+        entrada="20260101",
+    )  # fmt: skip
+    cenario.contrato("91900031", "2026-06-01")
+    # Empresa pública com registro sem qualificação: a natureza já tira a L7, sem aviso.
+    cenario.empresa(
+        "91900032", "EMPRESA PUBLICA SINTETICA", inicio="20200101", natureza="2011", numero="32"
+    )
+    cenario.socio(
+        "91900032", "DIRIGENTE SINTETICO", "***141414**", qualificacao="", entrada="20260101"
+    )
+    cenario.contrato("91900032", "2026-06-01")
+    # Sem contrato a L7 não se aplica: nada a avisar.
+    cenario.empresa("91900033", "SEM CONTRATO SINTETICA LTDA", inicio="20200101", numero="33")
+    cenario.socio(
+        "91900033", "SEM QUALIFICACAO TRES SINTETICO", "***151515**", qualificacao="",
+        entrada="20260101",
+    )  # fmt: skip
+    assert cenario.alertas("L7") == []
+    esperado = ["L7 não avaliada para 91900031: 2 registro(s) do QSA sem qualificação."]
+    assert avisos() == esperado and avisos("L7") == esperado and avisos("L1") == []
+    # Execução de outra tipologia não apaga o aviso da L7; nova execução da L7 não o repete.
+    cenario.alertas("L5")
+    assert avisos() == esperado
+    cenario.alertas("L7")
+    assert avisos() == esperado
+    # Nenhum dado de pessoa no aviso.
+    assert "SINTETICO" not in esperado[0] and "***" not in esperado[0]
+
+
+def test_rf03_l7_aviso_chega_pela_api_no_caso_e_na_auditoria(cliente, caso_carregado, sessao):
+    import re
+
+    from sqlalchemy import select
+
+    from buscador.modelos import Aresta, Auditoria
+
+    assert (
+        cliente.get(f"/casos/{caso_carregado}", headers=cabecalhos()).json()["avisos_tipologias"]
+        == []
+    )
+    # Tira a qualificação de todo o quadro societário do caso (dados sintéticos da coleta).
+    arestas = sessao.execute(
+        select(Aresta).where(Aresta.caso_id == caso_carregado, Aresta.tipo == "socio_de")
+    ).scalars()
+    for aresta in arestas:
+        aresta.atributos = {**(aresta.atributos or {}), "qualificacao_socio": "00"}
+    sessao.commit()
+    r = cliente.post(
+        f"/casos/{caso_carregado}/alertas/executar",
+        json={"tipologias": ["L7"]},
+        headers=cabecalhos(),
+    )
+    assert r.status_code == 200 and r.json() == []
+    avisos = cliente.get(f"/casos/{caso_carregado}", headers=cabecalhos()).json()[
+        "avisos_tipologias"
+    ]
+    assert avisos
+    for aviso in avisos:
+        assert re.fullmatch(
+            r"L7 não avaliada para \d{8}: \d+ registro\(s\) do QSA sem qualificação\.", aviso
+        )
+    sessao.expire_all()
+    entrada = (
+        sessao.execute(
+            select(Auditoria)
+            .where(Auditoria.caso_id == caso_carregado, Auditoria.acao == "alerta.executar")
+            .order_by(Auditoria.seq.desc())
+        )
+        .scalars()
+        .first()
+    )
+    assert entrada.detalhes["avisos"] == avisos
+
+
 # ==== L8: empresa recém-aberta com sócio possivelmente agente público ===========================
 
 
