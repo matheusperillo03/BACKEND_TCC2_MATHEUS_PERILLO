@@ -42,6 +42,9 @@ class ResultadoColetaCaso:
     sugestoes_novas: int
     registros: int
     avisos: list[str] = field(default_factory=list)
+    # A fonte informou mais páginas do que as lidas (ver ``ResultadoColeta``).
+    incompleta: bool = False
+    paginas_restantes: int | None = None
 
     def para_dict(self) -> dict:
         return {
@@ -53,6 +56,8 @@ class ResultadoColetaCaso:
             "sugestoes_novas": self.sugestoes_novas,
             "registros": self.registros,
             "avisos": self.avisos,
+            "incompleta": self.incompleta,
+            "paginas_restantes": self.paginas_restantes,
         }
 
 
@@ -109,4 +114,6 @@ def executar_coleta(
         sugestoes_novas=estatisticas.sugestoes_novas,
         registros=len(resultado.registros),
         avisos=resultado.avisos + estatisticas.avisos,
+        incompleta=resultado.incompleta,
+        paginas_restantes=resultado.paginas_restantes,
     )

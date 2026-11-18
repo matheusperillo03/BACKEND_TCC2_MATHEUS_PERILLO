@@ -179,6 +179,42 @@ def test_coleta_cnpj_e_pncp(cliente, caso_id):
     assert detalhe["contagens"]["capturas"] == 5 and detalhe["contagens"]["entidades"] == 47
 
 
+def test_coleta_do_pncp_truncada_avisa_na_resposta_no_historico_e_na_auditoria(cliente, caso_id):
+    periodo = {"dataInicial": "20260101", "dataFinal": "20261231"}
+
+    def coletar(max_paginas: int) -> dict:
+        r = cliente.post(
+            f"/casos/{caso_id}/coletas",
+            json={"fonte": "pncp", "parametros": {**periodo, "max_paginas": max_paginas}},
+            headers=cabecalhos(),
+        )
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    # A fonte sintética tem 9 contratos em 2 páginas: com 1 página, a coleta fica parcial.
+    parcial = coletar(1)
+    assert parcial["incompleta"] is True and parcial["paginas_restantes"] == 1
+    assert parcial["registros"] == 4 and parcial["situacao"] == "sucesso"
+    assert parcial["avisos"][0].startswith("Coleta incompleta:")
+    assert "9 contrato(s) em 2 página(s)" in parcial["avisos"][0]
+    completa = coletar(2)
+    assert completa["incompleta"] is False and completa["paginas_restantes"] is None
+    assert not any("incompleta" in a for a in completa["avisos"])
+
+    historico = cliente.get(f"/casos/{caso_id}/coletas", headers=cabecalhos()).json()
+    por_id = {c["id"]: c for c in historico}
+    assert por_id[parcial["coleta_id"]]["incompleta"] is True
+    assert por_id[completa["coleta_id"]]["incompleta"] is False
+
+    trilha = cliente.get(f"/auditoria?caso_id={caso_id}", headers=cabecalhos("tok-admin")).json()
+    execucoes = {
+        e["detalhes"]["coleta_id"]: e["detalhes"] for e in trilha if e["acao"] == "coleta.executar"
+    }
+    assert execucoes[parcial["coleta_id"]]["incompleta"] is True
+    assert execucoes[parcial["coleta_id"]]["paginas_restantes"] == 1
+    assert "incompleta" not in execucoes[completa["coleta_id"]]
+
+
 def test_coleta_com_erro_devolve_422_e_fica_na_auditoria(cliente, caso_id):
     r = cliente.post(
         f"/casos/{caso_id}/coletas",
