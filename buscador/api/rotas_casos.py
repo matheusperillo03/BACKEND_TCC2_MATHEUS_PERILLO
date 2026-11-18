@@ -248,7 +248,11 @@ def ver_caso(caso_id: str, ctx: Contexto = Depends(contexto)):
     }
     ctx.auditar("caso.ver", caso_id)
     ctx.concluir()
-    return {**_caso_para_dict(caso, ctx.papel_no_caso(caso_id)), "contagens": contagens}
+    return {
+        **_caso_para_dict(caso, ctx.papel_no_caso(caso_id)),
+        "contagens": contagens,
+        "avisos_tipologias": tipologias.avisos_do_caso(caso),
+    }
 
 
 MAX_AVISOS_COLETA = 50
@@ -883,7 +887,7 @@ def executar_alertas(
     corpo: esquemas.ExecutarAlertasEntrada | None = None,
     ctx: Contexto = Depends(contexto),
 ):
-    ctx.caso_aberto(caso_id, "alerta.executar")
+    caso = ctx.caso_aberto(caso_id, "alerta.executar")
     corpo = corpo or esquemas.ExecutarAlertasEntrada()
     try:
         parametros = tipologias.parametros_efetivos(
@@ -899,13 +903,16 @@ def executar_alertas(
         )
     except (ValueError, OverflowError) as erro:
         raise HTTPException(HTTP_422, str(erro)) from erro
+    executadas = list(dict.fromkeys(corpo.tipologias or tipologias.ordem_tipologias()))
     ctx.auditar(
         "alerta.executar",
         caso_id,
         {
             "parametros": parametros,
-            "tipologias": list(dict.fromkeys(corpo.tipologias or tipologias.ordem_tipologias())),
+            "tipologias": executadas,
             "alertas": len(alertas),
+            # O que as tipologias desta execução deixaram de avaliar por falta de dado.
+            "avisos": tipologias.avisos_do_caso(caso, executadas),
         },
     )
     ctx.concluir()

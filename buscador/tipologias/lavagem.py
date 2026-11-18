@@ -594,8 +594,16 @@ def tipologia_l7(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
         if inicio is None or _natureza_estatal(empresa):
             return None
         quadro_atual = quadro.get(empresa_id, [])
-        # Sem a qualificação não se sabe se o registro é de sócio: a regra não afirma nada.
-        if any(_qualificacao(a) == QUALIFICACAO_NAO_INFORMADA for _, a in quadro_atual):
+        # Sem a qualificação não se sabe se o registro é de sócio: a regra não afirma nada, e a
+        # execução avisa que a empresa ficou sem avaliação (decisão do autor).
+        sem_qualificacao = sum(
+            _qualificacao(a) == QUALIFICACAO_NAO_INFORMADA for _, a in quadro_atual
+        )
+        if sem_qualificacao:
+            ctx.avisos.append(
+                f"L7 não avaliada para {empresa.identificador or empresa.rotulo}: "
+                f"{sem_qualificacao} registro(s) do QSA sem qualificação."
+            )
             return None
         # Administrador sem participação (diretor, presidente) não é sócio nem fundador.
         socios = [(s, a) for s, a in quadro_atual if _qualificacao(a) in L7_QUALIFICACOES_SOCIO]

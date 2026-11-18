@@ -343,6 +343,101 @@ def test_rf03_l7_so_conta_qualificacao_de_socio_ou_titular(cenario):
     assert [a.entidades[0] for a in cenario.alertas("L7")] == [alerta.entidades[0]]
 
 
+def test_rf03_l7_avisa_quando_o_quadro_tem_registro_sem_qualificacao(cenario):
+    from buscador.modelos import Caso
+    from buscador.tipologias import avisos_do_caso
+
+    def avisos(*codigos):
+        cenario.sessao.flush()
+        cenario.sessao.expire_all()
+        return avisos_do_caso(cenario.sessao.get(Caso, cenario.caso_id), list(codigos) or None)
+
+    # Dois registros sem qualificação (vazia e 00 "Não informada") e um sócio novo (22).
+    cenario.empresa("91900031", "DOIS SEM QUALIFICACAO SINTETICA LTDA", inicio="20200101")
+    cenario.socio(
+        "91900031", "SOCIO NOVO TRES SINTETICO", "***111111**", qualificacao="22",
+        entrada="20260101",
+    )  # fmt: skip
+    cenario.socio(
+        "91900031", "SEM QUALIFICACAO UM SINTETICO", "***121212**", qualificacao="",
+        entrada="20260101",
+    )  # fmt: skip
+    cenario.socio(
+        "91900031", "SEM QUALIFICACAO DOIS SINTETICO", "***131313**", qualificacao="00",
+        entrada="20260101",
+    )  # fmt: skip
+    cenario.contrato("91900031", "2026-06-01")
+    # Empresa pública com registro sem qualificação: a natureza já tira a L7, sem aviso.
+    cenario.empresa(
+        "91900032", "EMPRESA PUBLICA SINTETICA", inicio="20200101", natureza="2011", numero="32"
+    )
+    cenario.socio(
+        "91900032", "DIRIGENTE SINTETICO", "***141414**", qualificacao="", entrada="20260101"
+    )
+    cenario.contrato("91900032", "2026-06-01")
+    # Sem contrato a L7 não se aplica: nada a avisar.
+    cenario.empresa("91900033", "SEM CONTRATO SINTETICA LTDA", inicio="20200101", numero="33")
+    cenario.socio(
+        "91900033", "SEM QUALIFICACAO TRES SINTETICO", "***151515**", qualificacao="",
+        entrada="20260101",
+    )  # fmt: skip
+    assert cenario.alertas("L7") == []
+    esperado = ["L7 não avaliada para 91900031: 2 registro(s) do QSA sem qualificação."]
+    assert avisos() == esperado and avisos("L7") == esperado and avisos("L1") == []
+    # Execução de outra tipologia não apaga o aviso da L7; nova execução da L7 não o repete.
+    cenario.alertas("L5")
+    assert avisos() == esperado
+    cenario.alertas("L7")
+    assert avisos() == esperado
+    # Nenhum dado de pessoa no aviso.
+    assert "SINTETICO" not in esperado[0] and "***" not in esperado[0]
+
+
+def test_rf03_l7_aviso_chega_pela_api_no_caso_e_na_auditoria(cliente, caso_carregado, sessao):
+    import re
+
+    from sqlalchemy import select
+
+    from buscador.modelos import Aresta, Auditoria
+
+    assert (
+        cliente.get(f"/casos/{caso_carregado}", headers=cabecalhos()).json()["avisos_tipologias"]
+        == []
+    )
+    # Tira a qualificação de todo o quadro societário do caso (dados sintéticos da coleta).
+    arestas = sessao.execute(
+        select(Aresta).where(Aresta.caso_id == caso_carregado, Aresta.tipo == "socio_de")
+    ).scalars()
+    for aresta in arestas:
+        aresta.atributos = {**(aresta.atributos or {}), "qualificacao_socio": "00"}
+    sessao.commit()
+    r = cliente.post(
+        f"/casos/{caso_carregado}/alertas/executar",
+        json={"tipologias": ["L7"]},
+        headers=cabecalhos(),
+    )
+    assert r.status_code == 200 and r.json() == []
+    avisos = cliente.get(f"/casos/{caso_carregado}", headers=cabecalhos()).json()[
+        "avisos_tipologias"
+    ]
+    assert avisos
+    for aviso in avisos:
+        assert re.fullmatch(
+            r"L7 não avaliada para \d{8}: \d+ registro\(s\) do QSA sem qualificação\.", aviso
+        )
+    sessao.expire_all()
+    entrada = (
+        sessao.execute(
+            select(Auditoria)
+            .where(Auditoria.caso_id == caso_carregado, Auditoria.acao == "alerta.executar")
+            .order_by(Auditoria.seq.desc())
+        )
+        .scalars()
+        .first()
+    )
+    assert entrada.detalhes["avisos"] == avisos
+
+
 # ==== L8: empresa recém-aberta com sócio possivelmente agente público ===========================
 
 
