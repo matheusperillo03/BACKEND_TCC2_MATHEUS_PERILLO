@@ -477,21 +477,30 @@ As tipologias T1 a T10 sinalizam possíveis infrações antecedentes em contrata
 
 | Tipologia | Regra | Base | Severidade e erro que prefere evitar |
 |---|---|---|---|
-| **L6** Porte ou MEI incompatível | Soma do valor dos contratos assinados no ano-calendário (valor inicial; sem ele, o global) **acima** do limite legal de receita do regime. MEI: opção e datas da tabela Simples, só para contratos assinados enquanto a opção valia. Fora do MEI: porte do cadastro (01 microempresa, 03 pequeno porte). No ano de início do MEI, limite proporcional aos meses. Um alerta por empresa, ano e regime | Velasco et al. (2021), seção 3.2; LC 123/2006, arts. 3º e 18-A; LC 238/2026, arts. 2º e 10 | média; falso positivo |
+| **L6** Porte ou MEI incompatível | Soma do valor dos contratos assinados no ano-calendário (valor inicial; sem ele, o global) **acima** do limite legal de receita do regime naquele ano. MEI: opção e datas da tabela Simples, só para contratos assinados enquanto a opção valia. Fora do MEI: porte do cadastro (01 microempresa, 03 pequeno porte). No ano de início de atividade, limite proporcional aos meses (MEI, ME e EPP). Sem tolerância; o alerta diz a faixa do excesso (até 20% ou acima). Um alerta por empresa, ano e regime | Velasco et al. (2021), seção 3.2; LC 123/2006, arts. 3º e 18-A; LC 238/2026, arts. 2º e 10 | média; falso positivo |
 | **L10** (CEPIM e CEAF) | CEPIM: a entidade impedida conta como "sancionada" no vínculo por sócio ou endereço (o cadastro não tem período, e o alerta diz isso). CEAF: sócio de contratada ou de convenente com os mesmos seis dígitos do CPF e o mesmo nome de uma pessoa expulsa. **Possível coincidência** | FATF/Egmont (2018), item 3 | média; falso negativo |
 | **L16** Entidade sem fins lucrativos convenente | Convenente de natureza jurídica em `L16_NATUREZAS_SEM_FINS_LUCRATIVOS` (3069, 3301, 3999) com ao menos um sinal: (a) aberta menos de `L16_DIAS_MINIMOS` (180) dias antes da vigência; (b) registro no CEPIM; (c) dirigente que possivelmente coincide com servidor do órgão concedente; (d) dirigente que também é sócio de empresa no mesmo endereço, do mesmo CNAE principal ou recém-aberta | COAF, Casos e Casos (ANR 2021), 2.1, 2.8 e 2.9; Velasco et al. (2021), seção 5 | média; falso negativo |
 
-**Limites da L6** (`buscador/tipologias/legislacao.py`, conferidos no texto do Planalto em 17/11/2026):
+**Limites da L6** (`buscador/tipologias/legislacao.py`, conferidos no texto do Planalto em 18/11/2026):
 
-| Regime | Limite anual | Fonte |
-|---|---|---|
-| MEI, até 2026 | R$ 81.000,00 (R$ 6.750,00 por mês no ano de início) | LC 123/2006, art. 18-A, §§ 1º e 2º |
-| MEI, 2027 | R$ 110.000,00 (R$ 9.166,67 por mês) | LC 238/2026, art. 2º |
-| MEI, a partir de 2028 | R$ 140.000,00 (R$ 11.666,67 por mês) | LC 238/2026, arts. 1º e 10, I |
-| Microempresa | R$ 360.000,00 | LC 123/2006, art. 3º, I |
-| Empresa de pequeno porte | R$ 4.800.000,00 | LC 123/2006, art. 3º, II |
+| Regime | Ano-calendário | Limite anual | Fonte |
+|---|---|---|---|
+| MEI | 2012 a 2017 | R$ 60.000,00 (R$ 5.000,00 por mês no ano de início) | LC 123/2006, art. 18-A, §§ 1º e 2º (LC 139/2011, art. 7º) |
+| MEI | 2018 a 2026 | R$ 81.000,00 (R$ 6.750,00 por mês) | LC 123/2006, art. 18-A, §§ 1º e 2º (LC 155/2016, art. 11, III) |
+| MEI | 2027 | R$ 110.000,00 (R$ 9.166,67 por mês) | LC 238/2026, art. 2º e art. 10, II |
+| MEI | a partir de 2028 | R$ 140.000,00 (R$ 11.666,67 por mês) | LC 238/2026, arts. 1º e 10, I |
+| Microempresa | a partir de 2012 | R$ 360.000,00 | LC 123/2006, art. 3º, I |
+| Empresa de pequeno porte | 2012 a 2017 | R$ 3.600.000,00 | LC 123/2006, art. 3º, II (LC 139/2011) |
+| Empresa de pequeno porte | a partir de 2018 | R$ 4.800.000,00 | LC 123/2006, art. 3º, II (LC 155/2016) |
 
-Outros anos do MEI entram por `L6_LIMITES_MEI` (JSON, como os limites da T5). **Tolerância da transição** (`L6_TOLERANCIA_TRANSICAO=1`, decisão do autor): o art. 18-A, § 1º, mede a receita do ano anterior, então o valor de um ano é comparado com o maior entre o limite daquele ano e o do ano seguinte. Em 2026, por exemplo, só dispara acima de R$ 110.000,00; o alerta mostra o limite legal e o aplicado. Limites anteriores a 2026 não foram conferidos (vale a linha de 2026).
+Regra, como está na lei:
+
+- **Limite do ano.** O valor contratado num ano é comparado com o limite daquele ano-calendário. Não há tolerância: a lei não prevê margem em que o excesso deixe de ser excesso. A variável `L6_TOLERANCIA_TRANSICAO` foi retirada.
+- **Ano de início de atividade.** Limite proporcional aos meses, do mês do início até dezembro, contada a fração de mês como mês inteiro. MEI: valor mensal da lei vezes os meses (art. 18-A, § 2º). ME e EPP: limite anual vezes meses sobre 12 (art. 3º, § 2º).
+- **Faixa de 20%.** Só muda a data dos efeitos do excesso, e o alerta diz em qual faixa caiu. MEI: até 20%, desenquadramento a partir de 1º de janeiro do ano seguinte; acima, retroativo a 1º de janeiro do ano do excesso ou, no ano de início, ao início de atividade (art. 18-A, § 7º, III e IV). EPP: até 20%, exclusão no ano seguinte (art. 3º, §§ 9º-A e 12); acima, no mês seguinte ao do excesso (§ 9º) ou, no ano de início, retroativa ao início (§ 10). ME: passa a EPP no ano seguinte (art. 3º, § 7º).
+- **Antes de 2012.** Os limites não foram conferidos, e a L6 não avalia esses anos. O alerta da mesma empresa em outro ano lista os anos que ficaram de fora (`anos_nao_avaliados`).
+
+Outros anos do MEI entram por `L6_LIMITES_MEI` (JSON, como os limites da T5); cada linha vale do seu ano até a linha seguinte.
 
 **Coleta nova:**
 

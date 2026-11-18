@@ -39,24 +39,105 @@ def cenario(sessao, custodia, config) -> Cenario:
 
 def test_rf04_l6_limites_por_ano_vem_da_lei_e_a_configuracao_e_validada(tmp_path):
     limites = legislacao.limites_de_receita()
-    assert {a: v["anual"] for a, v in limites["mei"].items()} == {
-        "2026": 81_000.0,
-        "2027": 110_000.0,
-        "2028": 140_000.0,
+    assert {a: (v["anual"], v["mensal_inicio"]) for a, v in limites["mei"].items()} == {
+        "2012": (60_000.0, 5_000.0),
+        "2018": (81_000.0, 6_750.0),
+        "2027": (110_000.0, 9_166.67),
+        "2028": (140_000.0, 11_666.67),
     }
-    assert [v["mensal_inicio"] for v in limites["mei"].values()] == [6750.0, 9166.67, 11666.67]
+    assert {a: v["anual"] for a, v in limites["me_por_ano"].items()} == {"2012": 360_000.0}
+    assert {a: v["anual"] for a, v in limites["epp_por_ano"].items()} == {
+        "2012": 3_600_000.0,
+        "2018": 4_800_000.0,
+    }
+    # ``me`` e ``epp`` repetem a linha atual (formato que a tela já lê).
     assert (limites["me"]["anual"], limites["epp"]["anual"]) == (360_000.0, 4_800_000.0)
-    assert "LC nº 123/2006" in limites["mei"]["2026"]["fonte"]
-    assert "LC nº 238/2026" in limites["mei"]["2027"]["fonte"]
-    # Antes de 2026 vale a linha de 2026; depois de 2028, a de 2028.
-    assert legislacao.limite_mei_do_ano(limites, 2020)[0] == "2026"
+    assert "art. 18-A" in limites["mei"]["2018"]["fonte"]
+    assert "LC nº 238/2026, art. 2º" in limites["mei"]["2027"]["fonte"]
+    assert "art. 10, I" in limites["mei"]["2028"]["fonte"]
+    assert all("planalto.gov.br" in v["fonte"] for v in limites["mei"].values())
+    # Cada linha vale do seu ano até a seguinte; antes de 2012 não há limite conferido.
+    assert legislacao.limite_mei_do_ano(limites, 2011) is None
+    assert [legislacao.limite_mei_do_ano(limites, a)[0] for a in (2012, 2017, 2018, 2026)] == [
+        "2012",
+        "2012",
+        "2018",
+        "2018",
+    ]
     assert legislacao.limite_mei_do_ano(limites, 2027)[0] == "2027"
     assert legislacao.limite_mei_do_ano(limites, 2035)[0] == "2028"
+    assert limites["primeiro_ano"] == 2012
     extra = legislacao.limites_de_receita('{"2030": {"anual": 150000, "mensal_inicio": 12500}}')
     assert extra["mei"]["2030"]["anual"] == 150_000.0
     for invalido in ("{", "[]", '{"30": {}}', '{"2030": {"anual": -1, "mensal_inicio": 1}}'):
         with pytest.raises(ErroConfiguracao):
             criar_config(tmp_path, l6_limites_mei=invalido).validar()
+    # A tolerância da transição saiu da configuração: a lei não a prevê.
+    assert "l6_tolerancia_transicao" not in criar_config(tmp_path).parametros_tipologias()
+
+
+@pytest.mark.parametrize(
+    ("regime", "ano", "inicio", "meses", "esperado"),
+    [
+        # Ano cheio: o limite anual do ano-calendário.
+        ("mei", 2017, "2015-01-01", None, 60_000.0),
+        ("mei", 2026, "2020-01-01", None, 81_000.0),
+        ("mei", 2027, "2020-01-01", None, 110_000.0),
+        ("mei", 2028, "2020-01-01", None, 140_000.0),
+        ("me", 2026, "2020-01-01", None, 360_000.0),
+        ("epp", 2017, "2015-01-01", None, 3_600_000.0),
+        ("epp", 2026, "2020-01-01", None, 4_800_000.0),
+        # Ano de início do MEI: valor mensal da lei x meses (art. 18-A, § 2º).
+        ("mei", 2026, "2026-01-01", 12, 81_000.0),
+        ("mei", 2026, "2026-10-15", 3, 20_250.0),
+        ("mei", 2026, "2026-12-31", 1, 6_750.0),
+        ("mei", 2027, "2027-10-15", 3, 27_500.01),
+        ("mei", 2028, "2028-10-15", 3, 35_000.01),
+        ("mei", 2028, "2028-01-31", 12, 140_000.04),
+        # Ano de início de ME e EPP: limite anual x meses / 12 (art. 3º, § 2º).
+        ("me", 2026, "2026-10-15", 3, 90_000.0),
+        ("me", 2026, "2026-12-31", 1, 30_000.0),
+        ("epp", 2026, "2026-07-01", 6, 2_400_000.0),
+        ("epp", 2017, "2017-12-01", 1, 300_000.0),
+        # Início em outro ano: limite cheio.
+        ("me", 2027, "2026-10-15", None, 360_000.0),
+    ],
+)
+def test_rf04_l6_limite_de_receita_do_ano_e_proporcional_no_ano_de_inicio(
+    regime, ano, inicio, meses, esperado
+):
+    from datetime import date
+
+    limites = legislacao.limites_de_receita()
+    limite = legislacao.limite_de_receita(limites, regime, ano, date.fromisoformat(inicio))
+    assert (limite["meses"], limite["limite_legal"]) == (meses, esperado)
+    artigo = "art. 18-A, § 2º" if regime == "mei" else "art. 3º, § 2º"
+    assert (limite["dispositivo_proporcional"] or "").endswith(artigo) is (meses is not None)
+    # Antes de 2012 os limites não foram conferidos.
+    assert legislacao.limite_de_receita(limites, regime, 2011, None) is None
+
+
+@pytest.mark.parametrize(
+    ("regime", "soma", "limite", "inicio", "faixa", "dispositivo"),
+    [
+        ("mei", 81_000.01, 81_000.0, False, "ate_20", "art. 18-A, § 7º, III, a"),
+        ("mei", 97_200.0, 81_000.0, False, "ate_20", "art. 18-A, § 7º, III, a"),
+        ("mei", 97_200.01, 81_000.0, False, "acima_de_20", "art. 18-A, § 7º, III, b"),
+        ("mei", 24_300.0, 20_250.0, True, "ate_20", "art. 18-A, § 7º, IV, a"),
+        ("mei", 24_300.01, 20_250.0, True, "acima_de_20", "art. 18-A, § 7º, IV, b"),
+        ("epp", 5_760_000.0, 4_800_000.0, False, "ate_20", "art. 3º, §§ 9º e 9º-A"),
+        ("epp", 5_760_000.01, 4_800_000.0, False, "acima_de_20", "art. 3º, § 9º"),
+        ("epp", 2_880_000.0, 2_400_000.0, True, "ate_20", "art. 3º, §§ 10 e 12"),
+        ("epp", 2_880_000.01, 2_400_000.0, True, "acima_de_20", "art. 3º, § 10"),
+        ("me", 500_000.0, 360_000.0, False, None, "art. 3º, § 7º"),
+    ],
+)
+def test_rf04_l6_efeito_do_excesso_segue_a_faixa_de_20_por_cento_da_lei(
+    regime, soma, limite, inicio, faixa, dispositivo
+):
+    efeito = legislacao.efeito_do_excesso(regime, soma, limite, inicio)
+    assert efeito["faixa"] == faixa
+    assert efeito["dispositivo"] == f"LC nº 123/2006, {dispositivo}"
 
 
 def _mei(cenario: Cenario, valor: float, ano: str = "2026", inicio: str = "20200101", **kw):
@@ -71,47 +152,162 @@ def test_rf04_l6_dispara_para_mei_com_contratos_acima_do_limite_do_ano(cenario):
     verificar_explicacao(alerta, cenario.sessao)
     p = alerta.parametros
     assert (p["regime"], p["ano"], p["soma_contratada"]) == ("mei", 2026, 120_000.0)
-    # Limite legal de 2026 (R$ 81 mil); com a tolerância, a comparação usa o de 2027 (R$ 110 mil).
-    assert (p["limite_legal"], p["limite_aplicado"], p["ano_da_tolerancia"]) == (
-        81_000.0,
-        110_000.0,
-        2027,
+    assert (p["limite_anual"], p["limite_legal"], p["excesso"]) == (81_000.0, 81_000.0, 39_000.0)
+    assert p["meses_no_ano_de_inicio"] is None and p["dispositivo_proporcional"] is None
+    assert (p["faixa_excesso"], p["dispositivo_excesso"]) == (
+        "acima_de_20",
+        "LC nº 123/2006, art. 18-A, § 7º, III, b",
     )
-    assert "LC nº 123/2006" in p["fonte_limite"]
+    assert "LC nº 123/2006, art. 18-A" in p["fonte_limite"]
     assert numero in alerta.motivo and "R$ 120.000,00" in alerta.motivo
-    assert "R$ 81.000,00" in alerta.motivo and "tolerância da transição" in alerta.motivo
+    assert "R$ 81.000,00" in alerta.motivo and "art. 18-A, § 7º, III, b" in alerta.motivo
+    assert "retroativamente a 1º de janeiro" in alerta.motivo
     assert "não é receita do ano" in alerta.motivo and "não conclusão" in alerta.motivo
     assert {e["fonte"] for e in alerta.evidencias} == {"cnpj_arquivo", "pncp"}
+    # Sem a antiga tolerância da transição.
+    assert "tolerância" not in alerta.motivo
+    assert not {"limite_aplicado", "ano_da_tolerancia", "l6_tolerancia_transicao"} & set(p)
 
 
-def test_rf04_l6_limite_faixa_de_tolerancia_entre_os_limites_de_anos_vizinhos(cenario):
-    # R$ 100 mil em 2026: acima de R$ 81 mil (2026), dentro de R$ 110 mil (2027).
+@pytest.mark.parametrize(
+    ("ano", "limite"), [("2026", 81_000.0), ("2027", 110_000.0), ("2028", 140_000.0)]
+)
+def test_rf04_l6_limite_mei_em_2026_2027_e_2028_no_limite_nao_dispara_e_acima_dispara(
+    cenario, ano, limite
+):
+    _mei(cenario, limite, ano=ano)
+    assert cenario.alertas("L6") == []
+    cenario.contrato("92400001", f"{ano}-07-01", 0.01)
+    (alerta,) = cenario.alertas("L6")
+    p = alerta.parametros
+    assert (p["ano"], p["limite_legal"], p["excesso"]) == (int(ano), limite, 0.01)
+    # Excesso de até 20%: os efeitos ficam para 1º de janeiro do ano seguinte.
+    assert (p["faixa_excesso"], p["dispositivo_excesso"]) == (
+        "ate_20",
+        "LC nº 123/2006, art. 18-A, § 7º, III, a",
+    )
+    assert "a partir de 1º de janeiro do ano-calendário seguinte" in alerta.motivo
+    assert ("LC nº 238/2026" in p["fonte_limite"]) is (ano != "2026")
+
+
+def test_rf04_l6_limite_em_2026_nao_usa_o_limite_de_2027_como_tolerancia(cenario):
+    # R$ 100 mil em 2026: acima de R$ 81 mil. O limite de R$ 110 mil só vale em 2027.
     _mei(cenario, 100_000.0)
-    assert cenario.alertas("L6") == []
-    (alerta,) = cenario.alertas("L6", l6_tolerancia_transicao=False)
-    assert alerta.parametros["limite_aplicado"] == 81_000.0
-    assert alerta.parametros["ano_da_tolerancia"] is None
-
-
-def test_rf04_l6_limite_valor_igual_ao_limite_nao_dispara_e_2028_usa_140_mil(cenario):
-    _mei(cenario, 140_000.0, ano="2028")
-    assert cenario.alertas("L6") == []
-    cenario.contrato("92400001", "2028-07-01", 0.01)
     (alerta,) = cenario.alertas("L6")
-    assert alerta.parametros["limite_legal"] == 140_000.0 and alerta.parametros["ano"] == 2028
+    assert alerta.parametros["limite_legal"] == 81_000.0
+    assert alerta.parametros["faixa_excesso"] == "acima_de_20"
 
 
-def test_rf04_l6_no_ano_de_inicio_o_limite_do_mei_e_proporcional_aos_meses(cenario):
-    # Início em outubro de 2028: 3 meses x R$ 11.666,67 = R$ 35.000,01.
-    cenario.empresa("92400001", "MEI SINTETICO NOVO", inicio="20281015", porte="01")
-    simples(cenario, "92400001", opcao_mei="20281015")
-    cenario.contrato("92400001", "2028-11-01", 35_000.0)
+@pytest.mark.parametrize(
+    ("ano", "limite"), [("2026", 20_250.0), ("2027", 27_500.01), ("2028", 35_000.01)]
+)
+def test_rf04_l6_no_ano_de_inicio_o_limite_do_mei_e_proporcional_aos_meses(cenario, ano, limite):
+    # Início em 15 de outubro: outubro (fração), novembro e dezembro = 3 meses x o valor mensal.
+    cenario.empresa("92400001", "MEI SINTETICO NOVO", inicio=f"{ano}1015", porte="01")
+    simples(cenario, "92400001", opcao_mei=f"{ano}1015")
+    cenario.contrato("92400001", f"{ano}-11-01", limite)
     assert cenario.alertas("L6") == []
-    cenario.contrato("92400001", "2028-12-01", 10.0)
+    cenario.contrato("92400001", f"{ano}-12-01", 0.01)
     (alerta,) = cenario.alertas("L6")
-    assert alerta.parametros["meses_no_ano_de_inicio"] == 3
-    assert alerta.parametros["limite_legal"] == 35_000.01
-    assert "proporcional a 3 meses" in alerta.motivo
+    p = alerta.parametros
+    assert (p["meses_no_ano_de_inicio"], p["limite_legal"]) == (3, limite)
+    assert p["dispositivo_proporcional"] == "LC nº 123/2006, art. 18-A, § 2º"
+    assert p["dispositivo_excesso"] == "LC nº 123/2006, art. 18-A, § 7º, IV, a"
+    assert "proporcional a 3 meses" in alerta.motivo and "art. 18-A, § 2º" in alerta.motivo
+    assert f"início em 15/10/{ano}" in alerta.motivo
+    # Acima de 20% do limite proporcional: retroage ao início de atividade (inciso IV, b).
+    cenario.contrato("92400001", f"{ano}-12-02", limite)
+    (alerta,) = cenario.alertas("L6")
+    assert alerta.parametros["dispositivo_excesso"] == "LC nº 123/2006, art. 18-A, § 7º, IV, b"
+    assert "retroativamente ao início de atividade" in alerta.motivo
+
+
+def test_rf04_l6_no_ano_seguinte_ao_inicio_o_mei_volta_ao_limite_anual(cenario):
+    cenario.empresa("92400001", "MEI SINTETICO NOVO", inicio="20261015", porte="01")
+    simples(cenario, "92400001", opcao_mei="20261015")
+    cenario.contrato("92400001", "2027-03-01", 110_000.0)
+    assert cenario.alertas("L6") == []
+
+
+def test_rf04_l6_no_ano_de_inicio_o_limite_de_me_e_proporcional_aos_meses(cenario):
+    # Microempresa aberta em 15/10/2026: 3/12 de R$ 360 mil = R$ 90 mil (art. 3º, § 2º).
+    cenario.empresa("92400005", "MICRO NOVA SINTETICA LTDA", inicio="20261015", porte="01")
+    cenario.contrato("92400005", "2026-11-01", 90_000.0)
+    assert cenario.alertas("L6") == []
+    cenario.contrato("92400005", "2026-12-01", 0.01)
+    (alerta,) = cenario.alertas("L6")
+    verificar_explicacao(alerta, cenario.sessao)
+    p = alerta.parametros
+    assert (p["regime"], p["limite_anual"], p["limite_legal"]) == ("me", 360_000.0, 90_000.0)
+    assert (p["meses_no_ano_de_inicio"], p["faixa_excesso"]) == (3, None)
+    assert p["dispositivo_proporcional"] == "LC nº 123/2006, art. 3º, § 2º"
+    assert p["dispositivo_excesso"] == "LC nº 123/2006, art. 3º, § 7º"
+    assert "3/12 do limite anual" in alerta.motivo and "R$ 90.000,00" in alerta.motivo
+    assert "art. 3º, § 2º" in alerta.motivo and "art. 3º, § 7º" in alerta.motivo
+    # No ano seguinte vale o limite cheio: R$ 200 mil em 2027 não disparam.
+    cenario.contrato("92400005", "2027-02-01", 200_000.0)
+    assert [a.parametros["ano"] for a in cenario.alertas("L6")] == [2026]
+
+
+def test_rf04_l6_no_ano_de_inicio_o_limite_de_epp_e_proporcional_aos_meses(cenario):
+    # Pequeno porte aberta em 01/07/2026: 6/12 de R$ 4,8 milhões = R$ 2,4 milhões.
+    cenario.empresa("92400006", "PEQUENO PORTE NOVA SINTETICA LTDA", inicio="20260701", porte="03")
+    cenario.contrato("92400006", "2026-08-01", 2_400_000.0)
+    assert cenario.alertas("L6") == []
+    cenario.contrato("92400006", "2026-09-01", 480_000.0)
+    (alerta,) = cenario.alertas("L6")
+    p = alerta.parametros
+    assert (p["limite_legal"], p["meses_no_ano_de_inicio"]) == (2_400_000.0, 6)
+    # Excesso de exatamente 20%: a exclusão não retroage (§ 12).
+    assert (p["faixa_excesso"], p["dispositivo_excesso"]) == (
+        "ate_20",
+        "LC nº 123/2006, art. 3º, §§ 10 e 12",
+    )
+    cenario.contrato("92400006", "2026-10-01", 0.01)
+    (alerta,) = cenario.alertas("L6")
+    assert alerta.parametros["dispositivo_excesso"] == "LC nº 123/2006, art. 3º, § 10"
+    assert "retroativos ao início das atividades" in alerta.motivo
+
+
+def test_rf04_l6_epp_em_ano_cheio_segue_a_faixa_de_20_por_cento_do_art_3(cenario):
+    cenario.empresa("92400007", "PEQUENO PORTE ANTIGA SINTETICA LTDA", porte="03")
+    cenario.contrato("92400007", "2026-02-01", 4_800_000.0)
+    assert cenario.alertas("L6") == []
+    cenario.contrato("92400007", "2026-03-01", 960_000.0)
+    (alerta,) = cenario.alertas("L6")
+    assert alerta.parametros["dispositivo_excesso"] == "LC nº 123/2006, art. 3º, §§ 9º e 9º-A"
+    assert "no ano-calendário seguinte" in alerta.motivo
+    cenario.contrato("92400007", "2026-04-01", 0.01)
+    (alerta,) = cenario.alertas("L6")
+    assert alerta.parametros["dispositivo_excesso"] == "LC nº 123/2006, art. 3º, § 9º"
+    assert "no mês seguinte ao do excesso" in alerta.motivo
+
+
+def test_rf04_l6_usa_o_limite_vigente_em_cada_ano_e_nao_avalia_antes_de_2012(cenario):
+    # 2017: MEI R$ 60 mil e pequeno porte R$ 3,6 milhões (LC nº 139/2011).
+    _mei(cenario, 70_000.0, ano="2017", inicio="20150101")
+    cenario.empresa("92400008", "PEQUENO PORTE 2017 SINTETICA LTDA", porte="03", inicio="20100101")
+    cenario.contrato("92400008", "2017-05-01", 4_000_000.0)
+    # 2011: sem limite conferido; não avalia, por maior que seja o valor.
+    cenario.contrato("92400008", "2011-05-01", 90_000_000.0)
+    cenario.empresa("92400009", "MICRO 2011 SINTETICA LTDA", porte="01", inicio="20100101")
+    cenario.contrato("92400009", "2011-05-01", 90_000_000.0)
+    alertas = {a.parametros["regime"]: a for a in cenario.alertas("L6")}
+    assert set(alertas) == {"mei", "epp"}
+    assert alertas["mei"].parametros["limite_legal"] == 60_000.0
+    assert "LC nº 139/2011" in alertas["mei"].parametros["fonte_limite"]
+    assert alertas["epp"].parametros["limite_legal"] == 3_600_000.0
+    assert alertas["epp"].parametros["anos_nao_avaliados"] == [2011]
+    assert "Não avaliados: contratos de 2011" in alertas["epp"].motivo
+    assert alertas["mei"].parametros["anos_nao_avaliados"] == []
+
+
+def test_rf04_l6_microempresa_que_passa_tambem_do_limite_de_epp_diz_isso(cenario):
+    cenario.empresa("92400010", "MICRO GRANDE SINTETICA LTDA", porte="01")
+    cenario.contrato("92400010", "2026-02-01", 5_000_000.0)
+    (alerta,) = cenario.alertas("L6")
+    assert alerta.parametros["regime"] == "me"
+    assert "também passa do limite de empresa de pequeno porte" in alerta.motivo
 
 
 def test_rf04_l6_so_conta_como_mei_o_contrato_assinado_enquanto_a_opcao_valia(cenario):

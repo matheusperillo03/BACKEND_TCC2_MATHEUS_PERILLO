@@ -213,12 +213,11 @@ class Configuracao(BaseSettings):
     # Qualificações de sócio que contam como administração (L3, L10 e L14), por vírgula.
     qualificacoes_administracao: str = "05,10,16,28,49,50,65"
     # L6 (porte ou MEI incompatível): limites do MEI de outros anos-calendário, em JSON. Vazio =
-    # só a tabela do código (``tipologias.legislacao.LIMITES_MEI``: 2026, 2027 e 2028).
+    # só a tabela do código (``tipologias.legislacao.LIMITES_MEI``: 2012, 2018, 2027 e 2028; cada
+    # linha vale do seu ano até a linha seguinte). A regra segue a LC nº 123/2006 e não tem
+    # tolerância configurável.
     # Exemplo: {"2029": {"anual": 150000.00, "mensal_inicio": 12500.00, "fonte": "lei"}}
     l6_limites_mei: str = ""
-    # Tolerância da transição de limite do MEI: compara o valor do ano com o maior entre o limite
-    # do ano e o do ano seguinte (decisão do autor; ver ``tipologias.lavagem``).
-    l6_tolerancia_transicao: bool = True
     # L16 (entidade sem fins lucrativos convenente): dias mínimos entre o início da atividade e
     # o início da vigência, e naturezas jurídicas tratadas como sem fins lucrativos (tabela de
     # domínio Naturezas do CNPJ: 3069 Fundação Privada, 3301 Organização Social, 3999 Associação
@@ -517,7 +516,6 @@ class Configuracao(BaseSettings):
             "l15_minimo_categorias": self.l15_minimo_categorias,
             "qualificacoes_administracao": administracao,
             "l6_limites": limites_receita,
-            "l6_tolerancia_transicao": self.l6_tolerancia_transicao,
             "l16_dias_minimos": self.l16_dias_minimos,
             "l16_naturezas_sem_fins_lucrativos": naturezas,
             "comb_minimo_tipologias": self.comb_minimo_tipologias,

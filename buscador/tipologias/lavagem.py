@@ -114,7 +114,6 @@ def parametros_padrao() -> dict:
         "l15_minimo_categorias": 4,
         "qualificacoes_administracao": list(QUALIFICACOES_ADMINISTRACAO),
         "l6_limites": legislacao.limites_de_receita(),
-        "l6_tolerancia_transicao": True,
         "l16_dias_minimos": 180,
         "l16_naturezas_sem_fins_lucrativos": list(NATUREZAS_SEM_FINS_LUCRATIVOS),
     }
@@ -1084,19 +1083,25 @@ def tipologia_l15(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 # Velasco et al. (2021), seção 3.2: "Incompatible company size: if a self-employed person
 # (Microempreendedor Individual [...]) won public contracts above income limits defined by the
 # Brazilian legislation"; Carta Circular BCB nº 4.001/2020, III, n. Os limites são LEGAIS (LC nº
-# 123/2006 e LC nº 238/2026) e estão em ``legislacao.LIMITES_MEI``, ``LIMITE_ME`` e ``LIMITE_EPP``.
+# 123/2006 e LC nº 238/2026) e estão em ``legislacao`` (``LIMITES_MEI``, ``LIMITES_ME`` e
+# ``LIMITES_EPP``).
 # Complementa a T3, que compara com o capital social (declarado e frágil).
 #
 # Decisões do autor:
 # - o valor contratado é o valor inicial do contrato (ou o global, dizendo qual) e é somado no
 #   ano da assinatura: contrato plurianual não é receita de um só ano (falso positivo esperado);
 # - o regime é o da data de cada assinatura: MEI pela opção e pelas datas da tabela Simples; fora
-#   do MEI, o porte do cadastro (01 microempresa, 03 pequeno porte), que é o ATUAL;
-# - tolerância da transição: o art. 18-A, § 1º, mede a receita "no ano-calendário anterior", então
-#   quem continua MEI no ano seguinte pode ter faturado até o limite novo. Com a tolerância ligada
-#   (padrão), o valor do ano é comparado com o MAIOR entre o limite do ano e o do ano seguinte;
-# - no ano de início da atividade, o limite do MEI é proporcional aos meses (§ 2º), contado o mês
-#   do início. Para microempresa e pequeno porte a regra usa o limite anual cheio.
+#   do MEI, o porte do cadastro (01 microempresa, 03 pequeno porte), que é o ATUAL.
+#
+# O que vem da lei (texto e dispositivos em ``legislacao``):
+# - o valor do ano é comparado com o limite daquele ano-calendário, sem tolerância: a lei não
+#   prevê margem em que o excesso deixe de ser excesso;
+# - no ano de início de atividade o limite é proporcional aos meses, contada a fração de mês como
+#   mês inteiro: MEI, art. 18-A, § 2º; microempresa e pequeno porte, art. 3º, § 2º;
+# - a faixa de 20% só muda a data dos efeitos do excesso (art. 18-A, § 7º, III e IV; art. 3º,
+#   §§ 9º, 9º-A, 10 e 12). O alerta dispara com qualquer excesso e diz em qual faixa caiu;
+# - ano anterior aos limites conferidos (antes de 2012) não é avaliado, e o alerta da mesma
+#   empresa em outro ano diz quais anos ficaram de fora.
 
 _NOMES_REGIME = {
     "mei": "microempreendedor individual (MEI)",
@@ -1118,41 +1123,9 @@ def _regime_na_data(empresa: Entidade, dia: date) -> str | None:
     return {legislacao.PORTE_ME: "me", legislacao.PORTE_EPP: "epp"}.get(porte)
 
 
-def _limite_do_regime(
-    limites: dict, regime: str, ano: int, inicio: date | None, tolerancia: bool
-) -> dict:
-    """Limite legal do ano e o limite aplicado (com a tolerância e a proporção do início)."""
-    if regime != "mei":
-        linha = limites[regime]
-        return {
-            "limite_legal": linha["anual"],
-            "limite_aplicado": linha["anual"],
-            "fonte": linha["fonte"],
-            "meses": None,
-            "ano_da_tolerancia": None,
-        }
-    _, do_ano = legislacao.limite_mei_do_ano(limites, ano)
-    _, do_seguinte = legislacao.limite_mei_do_ano(limites, ano + 1)
-    meses = 13 - inicio.month if inicio is not None and inicio.year == ano else None
-
-    def valor(linha: dict) -> float:
-        return round(linha["mensal_inicio"] * meses, 2) if meses else linha["anual"]
-
-    aplicado, ano_tolerancia = valor(do_ano), None
-    if tolerancia and valor(do_seguinte) > aplicado:
-        aplicado, ano_tolerancia = valor(do_seguinte), ano + 1
-    return {
-        "limite_legal": valor(do_ano),
-        "limite_aplicado": aplicado,
-        "fonte": do_ano["fonte"],
-        "meses": meses,
-        "ano_da_tolerancia": ano_tolerancia,
-    }
-
-
 def tipologia_l6(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
     limites: dict = parametros["l6_limites"]
-    tolerancia = bool(parametros["l6_tolerancia_transicao"])
+    nao_avaliados: dict[str, set[int]] = {}
     grupos: dict[tuple[str, int, str], list[tuple[Entidade, float, str]]] = {}
     for empresa_id, contratos in sorted(_contratos_por_empresa(ctx).items()):
         empresa = ctx.entidades[empresa_id]
@@ -1162,7 +1135,11 @@ def tipologia_l6(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
             if assinatura is None or valor is None or valor <= 0:
                 continue
             regime = _regime_na_data(empresa, assinatura)
-            if regime is not None:
+            if regime is None:
+                continue
+            if legislacao.limite_de_receita(limites, regime, assinatura.year, None) is None:
+                nao_avaliados.setdefault(empresa_id, set()).add(assinatura.year)
+            else:
                 grupos.setdefault((empresa_id, assinatura.year, regime), []).append(
                     (contrato, valor, base)
                 )
@@ -1170,10 +1147,17 @@ def tipologia_l6(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
     def regra(item) -> AlertaDetectado | None:
         (empresa_id, ano, regime), itens = item
         empresa = ctx.entidades[empresa_id]
-        limite = _limite_do_regime(limites, regime, ano, _inicio(empresa), tolerancia)
-        soma = sum(v for _, v, _ in itens)
-        if soma <= limite["limite_aplicado"]:
+        limite = legislacao.limite_de_receita(limites, regime, ano, _inicio(empresa))
+        if limite is None:
+            return None  # ano anterior aos limites conferidos; ver ``nao_avaliados``
+        soma = round(sum(v for _, v, _ in itens), 2)
+        if soma <= limite["limite_legal"]:
             return None
+        nome = _NOMES_REGIME[regime]
+        efeito = legislacao.efeito_do_excesso(
+            regime, soma, limite["limite_legal"], limite["meses"] is not None
+        )
+        excesso = round(soma - limite["limite_legal"], 2)
         atributos = _atr(empresa)
         if regime == "mei":
             situacao = (
@@ -1191,16 +1175,40 @@ def tipologia_l6(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
                 f"tem porte de {_NOMES_REGIME[regime]} no cadastro do CNPJ (porte "
                 f"{str(atributos.get('porte') or '').zfill(2)}, que é o porte ATUAL)"
             )
-        proporcional = (
-            f" No ano de início da atividade o limite é proporcional a {limite['meses']} meses."
-            if limite["meses"]
-            else ""
-        )
-        tolerado = (
-            f" Com a tolerância da transição, a comparação usou o limite de "
-            f"{limite['ano_da_tolerancia']}, {formatar_moeda(limite['limite_aplicado'])}, maior "
-            f"que o de {ano}."
-            if limite["ano_da_tolerancia"]
+        inicio_texto = formatar_data(atributos.get("data_inicio_atividade"))
+        if limite["meses"] is None:
+            limite_texto = (
+                f"O limite de receita bruta anual de {_NOMES_REGIME[regime]} em {ano} é de "
+                f"{formatar_moeda(limite['limite_legal'])} ({limite['fonte']})."
+            )
+        else:
+            conta = (
+                f"{formatar_moeda(limite['mensal_inicio'])} por mês"
+                if regime == "mei"
+                else f"{limite['meses']}/12 do limite anual"
+            )
+            limite_texto = (
+                f"O limite de receita bruta anual de {_NOMES_REGIME[regime]} em {ano} é de "
+                f"{formatar_moeda(limite['limite_anual'])} ({limite['fonte']}). Como {ano} é o "
+                f"ano de início de atividade (início em {inicio_texto}), "
+                f"vale o limite proporcional a {limite['meses']} "
+                f"{'mês' if limite['meses'] == 1 else 'meses'}, contada a fração de mês como mês "
+                f"inteiro ({conta}): {formatar_moeda(limite['limite_legal'])} "
+                f"({limite['dispositivo_proporcional']})."
+            )
+        acima_da_epp = ""
+        if regime == "me":
+            da_epp = legislacao.limite_de_receita(limites, "epp", ano, _inicio(empresa))
+            if da_epp is not None and soma > da_epp["limite_legal"]:
+                acima_da_epp = (
+                    f" A soma também passa do limite de empresa de pequeno porte, "
+                    f"{formatar_moeda(da_epp['limite_legal'])} (art. 3º, II)."
+                )
+        fora = sorted(nao_avaliados.get(empresa_id, ()))
+        fora_texto = (
+            f" Não avaliados: contratos de {_lista([str(a) for a in fora])}, porque os limites "
+            f"anteriores a {limites['primeiro_ano']} não foram conferidos no texto legal."
+            if fora
             else ""
         )
         contratos_texto = _lista(
@@ -1213,12 +1221,12 @@ def tipologia_l6(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
         motivo = (
             f"A empresa {empresa.rotulo} (CNPJ básico {empresa.identificador}) {situacao} e "
             f"assinou em {ano} contratos públicos que somam {formatar_moeda(soma)}: "
-            f"{contratos_texto}. O limite de receita bruta anual de {_NOMES_REGIME[regime]} em "
-            f"{ano} é de {formatar_moeda(limite['limite_legal'])} ({limite['fonte']})."
-            f"{proporcional}{tolerado} O valor contratado no ano passa do limite. Indício a "
-            "verificar: valor contratado não é receita do ano (contrato plurianual é pago ao "
-            "longo da vigência), o porte do cadastro pode estar desatualizado e a exclusão do "
-            "regime pode ter sido registrada depois. " + AVISO_PISTA
+            f"{contratos_texto}. {limite_texto} O valor contratado no ano passa do limite em "
+            f"{formatar_moeda(excesso)}. Se fosse receita bruta do ano, {efeito['efeito']} "
+            f"({efeito['dispositivo']}).{acima_da_epp}{fora_texto} Indício a verificar: valor "
+            "contratado não é receita do ano (contrato plurianual é pago ao longo da vigência), "
+            "o porte do cadastro pode estar desatualizado e a exclusão do regime pode ter sido "
+            "registrada depois. " + AVISO_PISTA
         )
         evidencias = [
             ctx.evidencia(
@@ -1246,7 +1254,7 @@ def tipologia_l6(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
         return AlertaDetectado(
             tipologia="L6",
             titulo=(
-                f"{_NOMES_REGIME[regime].capitalize()} com {formatar_moeda(soma)} contratados em "
+                f"{nome[0].upper()}{nome[1:]} com {formatar_moeda(soma)} contratados em "
                 f"{ano}: {empresa.rotulo}"
             ),
             motivo=motivo,
@@ -1257,12 +1265,15 @@ def tipologia_l6(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
                 "regime": regime,
                 "ano": ano,
                 "soma_contratada": round(soma, 2),
+                "limite_anual": limite["limite_anual"],
                 "limite_legal": limite["limite_legal"],
-                "limite_aplicado": limite["limite_aplicado"],
                 "fonte_limite": limite["fonte"],
                 "meses_no_ano_de_inicio": limite["meses"],
-                "ano_da_tolerancia": limite["ano_da_tolerancia"],
-                "l6_tolerancia_transicao": tolerancia,
+                "dispositivo_proporcional": limite["dispositivo_proporcional"],
+                "excesso": excesso,
+                "faixa_excesso": efeito["faixa"],
+                "dispositivo_excesso": efeito["dispositivo"],
+                "anos_nao_avaliados": fora,
                 "contratos": len(itens),
             },
         )

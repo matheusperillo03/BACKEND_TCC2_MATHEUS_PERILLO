@@ -139,13 +139,19 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
     "L6": (
         "H43",
         "Soma do valor dos contratos assinados no ano-calendário (valor inicial; sem ele, o "
-        "global) acima do limite legal de receita do regime: MEI pela tabela Simples e pelas "
-        "datas de opção e de exclusão; microempresa e pequeno porte pelo porte do cadastro.",
+        "global) acima do limite legal de receita do regime naquele ano: MEI pela tabela "
+        "Simples e pelas datas de opção e de exclusão; microempresa e pequeno porte pelo porte "
+        "do cadastro. No ano de início de atividade vale o limite proporcional aos meses, "
+        "contada a fração de mês como mês inteiro. Qualquer excesso dispara; o alerta diz se o "
+        "excesso passa de 20% do limite, o que muda a data dos efeitos previstos na lei. "
+        "Contratos anteriores a 2012 não são avaliados (limites não conferidos).",
         "Velasco et al. (2021), seção 3.2; Carta Circular BCB nº 4.001/2020, III, n. Limites: "
-        "LC nº 123/2006, arts. 3º e 18-A, e LC nº 238/2026, arts. 2º e 10 (MEI: R$ 81.000,00 até "
-        "2026, R$ 110.000,00 em 2027 e R$ 140.000,00 a partir de 2028).",
+        "LC nº 123/2006, art. 3º, I e II, e art. 18-A, § 1º; LC nº 238/2026, arts. 2º e 10 (MEI: "
+        "R$ 81.000,00 de 2018 a 2026, R$ 110.000,00 em 2027 e R$ 140.000,00 a partir de 2028). "
+        "Ano de início: art. 3º, § 2º, e art. 18-A, § 2º. Efeitos do excesso: art. 3º, §§ 7º, "
+        "9º, 9º-A, 10 e 12, e art. 18-A, § 7º, III e IV.",
         ["cnpj_arquivo (com a tabela Simples)", "pncp"],
-        ["l6_limites", "l6_tolerancia_transicao"],
+        ["l6_limites"],
     ),
     "L7": (
         "H44",
@@ -248,9 +254,9 @@ _DESCRICAO_PARAMETROS = {
     "l15_minimo_cnaes": "Número mínimo de CNAEs (principal e secundárias).",
     "l15_minimo_categorias": "Número mínimo de categorias de objeto contratadas.",
     "l6_limites": "Limites de receita bruta por regime, com a fonte: MEI por ano-calendário "
-    "(anual e mensal no ano de início), microempresa e empresa de pequeno porte.",
-    "l6_tolerancia_transicao": "Compara o valor do ano com o maior entre o limite do MEI do ano "
-    "e o do ano seguinte (transição de limite).",
+    "(anual e mensal no ano de início), microempresa e empresa de pequeno porte (linha atual "
+    "em 'me' e 'epp'; por ano em 'me_por_ano' e 'epp_por_ano'). Cada linha vale do seu ano até "
+    "a linha seguinte.",
     "l16_dias_minimos": "Dias mínimos entre o início da atividade e o início da vigência do "
     "convênio.",
     "l16_naturezas_sem_fins_lucrativos": "Naturezas jurídicas tratadas como sem fins lucrativos "
