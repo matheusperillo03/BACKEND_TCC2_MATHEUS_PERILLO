@@ -14,7 +14,22 @@ from tests.conftest import (
 
 def test_health_sem_autenticacao(cliente):
     r = cliente.get("/health")
-    assert r.status_code == 200 and r.json() == {"status": "ok"}
+    assert r.status_code == 200 and r.json() == {"status": "ok", "modo_dev": True}
+
+
+def test_health_diz_que_nao_ha_token_de_desenvolvimento_fora_do_modo_dev(tmp_path):
+    # Piloto de 18/11/2026 (MODO_DEV=0): a tela de entrada usa este campo para não oferecer o
+    # acesso por token, que o servidor recusa.
+    producao = criar_app(criar_config(tmp_path, modo_dev=False, tokens_dev=""))
+    with TestClient(producao) as fora_do_modo_dev:
+        r = fora_do_modo_dev.get("/health")
+        assert r.status_code == 200 and r.json() == {"status": "ok", "modo_dev": False}
+        # Nenhum token fixo autentica: nem os dos testes, nem os publicados, nem vazio.
+        for token in ("tok-admin", "tok-analista", "dev-admin", ""):
+            r = fora_do_modo_dev.get("/me", headers={"Authorization": f"Bearer {token}"})
+            assert r.status_code == 401, token
+            r = fora_do_modo_dev.get("/casos", headers=cabecalhos(token))
+            assert r.status_code == 401, token
 
 
 def test_docs_openapi_so_no_modo_dev(cliente, tmp_path):

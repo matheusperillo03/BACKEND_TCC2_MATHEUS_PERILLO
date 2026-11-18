@@ -186,7 +186,7 @@ def criar_app(
 
     @app.get("/health", response_model=esquemas.Saude, tags=["base"])
     def health():
-        return {"status": "ok"}
+        return {"status": "ok", "modo_dev": bool(config.modo_dev)}
 
     @app.get("/me", response_model=esquemas.UsuarioSaida, tags=["base"])
     def me(usuario: Usuario = Depends(usuario_atual)):

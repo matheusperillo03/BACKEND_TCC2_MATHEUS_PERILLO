@@ -17,7 +17,7 @@ O acesso é por **usuário real** (senha, MFA por TOTP e sessão). Crie o primei
 ```bash
 cp .env.example .env                  # preencha os campos obrigatórios
 docker compose up --build -d          # API em http://127.0.0.1:8100 (o PostgreSQL não é publicado no host)
-curl http://127.0.0.1:8100/health     # {"status":"ok"}
+curl http://127.0.0.1:8100/health     # {"status":"ok","modo_dev":false}
 docker compose exec api uv run --no-sync python scripts/carregar_demo.py   # carrega o caso de demonstração
 docker compose down                   # para tudo (os volumes osint-tcc-* preservam banco e capturas)
 ```
@@ -118,7 +118,7 @@ As rotas marcadas com **(novo)** ou **(alterado)** mudaram no horizonte 1 (H12 a
 
 | Método e rota | Descrição |
 |---|---|
-| `GET /health` | `{"status":"ok"}` |
+| `GET /health` | `{"status":"ok","modo_dev":true\|false}`. `modo_dev` (18/11/2026) só diz se os tokens de desenvolvimento existem (`MODO_DEV=1`); a tela de entrada do front-end usa o campo para esconder o acesso por token fora desse modo. Não é segredo: `/docs` já responde `404` fora do modo |
 | `GET /me` | `{"usuario","perfil"}` |
 | `POST /casos` **(alterado)** | Corpo `{"titulo","descricao"?,"numero_procedimento"?,"finalidade","retencao_ate"}`. `finalidade` (texto, 1 a 2000 caracteres, com letras ou números) e `retencao_ate` (data `AAAA-MM-DD`, hoje ou futura) são obrigatórias; sem elas, `422`. Resposta `201`: `{"id","titulo","descricao","numero_procedimento","criado_por","criado_em","finalidade","retencao_ate","somente_leitura"}` |
 | `GET /casos` **(alterado)** | Lista casos, com `finalidade`, `retencao_ate` e `somente_leitura` |
