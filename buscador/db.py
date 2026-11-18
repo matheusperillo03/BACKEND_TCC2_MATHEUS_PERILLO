@@ -7,7 +7,8 @@ dos alertas, só ``SELECT`` e ``INSERT``.
 
 Evolução do esquema: ``criar_esquema`` é idempotente. Além de criar as tabelas que faltam, ele
 acrescenta as colunas novas do modelo às tabelas que já existem (``ALTER TABLE ... ADD COLUMN``)
-e os índices dessas colunas. Nunca remove nem altera coluna, então nenhum dado é perdido.
+e os índices dessas colunas. Nunca remove coluna; a única alteração é alargar uma coluna de
+texto cujo tamanho cresceu no modelo (PostgreSQL), então nenhum dado é perdido.
 """
 
 from __future__ import annotations
@@ -199,6 +200,39 @@ def atualizar_esquema(engine: Engine) -> list[str]:
     return feitos
 
 
+def alargar_colunas(engine: Engine) -> list[str]:
+    """Alarga, no PostgreSQL, as colunas ``VARCHAR`` que ficaram mais largas no modelo.
+
+    Só aumenta o tamanho (nunca diminui), então nenhum valor gravado deixa de caber. O SQLite
+    não impõe o tamanho declarado: nada a fazer nele. Nomes e tamanhos vêm só do modelo."""
+    if engine.dialect.name != "postgresql":
+        return []
+    inspetor = inspect(engine)
+    existentes = set(inspetor.get_table_names())
+    comandos = []
+    for tabela in Base.metadata.sorted_tables:
+        if tabela.name not in existentes:
+            continue
+        no_banco = {c["name"]: c["type"] for c in inspetor.get_columns(tabela.name)}
+        for coluna in tabela.columns:
+            atual = getattr(no_banco.get(coluna.name), "length", None)
+            desejado = getattr(coluna.type, "length", None)
+            if isinstance(atual, int) and isinstance(desejado, int) and desejado > atual:
+                comandos.append(
+                    (
+                        f"ALTER TABLE {tabela.name} ALTER COLUMN {coluna.name} "
+                        f"TYPE VARCHAR({int(desejado)})",
+                        f"{tabela.name}.{coluna.name} (tamanho {desejado})",
+                    )
+                )
+    feitos = []
+    with engine.begin() as conexao:
+        for sql, nome in comandos:
+            conexao.execute(text(sql))
+            feitos.append(nome)
+    return feitos
+
+
 def _recusar_cadeia_v1(engine: Engine) -> None:
     inspetor = inspect(engine)
     if "auditoria" not in inspetor.get_table_names():
@@ -218,7 +252,7 @@ def criar_esquema(engine: Engine) -> list[str]:
     # A cadeia de auditoria versão 1 é recusada antes: ela não é migrável (ver README).
     _recusar_cadeia_v1(engine)
     Base.metadata.create_all(engine)
-    feitos = atualizar_esquema(engine)
+    feitos = atualizar_esquema(engine) + alargar_colunas(engine)
     verificar_esquema(engine)
     sqlite = engine.dialect.name == "sqlite"
     gatilhos = (_GATILHOS_SQLITE if sqlite else _GATILHOS_POSTGRES) + (

@@ -14,7 +14,7 @@ import json
 import re
 from collections.abc import Callable
 
-from buscador.ia.provedor import Geracao, Identidade
+from buscador.ia.provedor import Controle, Geracao, Identidade
 
 # CNPJ pontuado, numérico ou alfanumérico (12 posições com dígitos ou letras de A a Z + 2 DVs).
 _CNPJ = re.compile(
@@ -57,7 +57,11 @@ class ProvedorFalso:
             return dict(self._metricas[min(len(self.blocos_recebidos), len(self._metricas)) - 1])
         return dict(self._metricas or {})
 
-    def gerar(self, instrucoes: str, texto: str, esquema: dict) -> Geracao:
+    def gerar(
+        self, instrucoes: str, texto: str, esquema: dict, controle: Controle | None = None
+    ) -> Geracao:
+        if controle is not None:
+            controle.conferir_interrupcao()
         self.blocos_recebidos.append(texto)
         return Geracao(self._texto(texto), self._metricas_da_chamada())
 

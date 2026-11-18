@@ -69,6 +69,7 @@ from tests.conftest import (
     cabecalhos,
     corpo_caso,
     criar_config,
+    extrair_e_esperar,
 )
 
 SENHA = "frase-sintetica-de-teste-2026"
@@ -82,6 +83,19 @@ def _acoes(app, caso_id: str | None = None) -> list[str]:
         if caso_id is not None:
             consulta = consulta.where(Auditoria.caso_id == caso_id)
         return list(s.execute(consulta).scalars())
+
+
+def _desfecho(app) -> Auditoria:
+    """A entrada de auditoria do fim da última extração (gravada pelo trabalhador)."""
+    acoes = ("ia.extracao_concluida", "ia.extracao_falha")
+    with app.state.fabrica_sessoes() as s:
+        return (
+            s.execute(
+                select(Auditoria).where(Auditoria.acao.in_(acoes)).order_by(Auditoria.seq.desc())
+            )
+            .scalars()
+            .first()
+        )
 
 
 def _entradas(app, acao: str) -> list[Auditoria]:
@@ -1416,7 +1430,9 @@ def _caso_com_edital(cliente) -> tuple[str, str]:
 
 
 def _extrair(cliente, caso_id, captura_id, h=H_ANA):
-    return cliente.post(f"/casos/{caso_id}/capturas/{captura_id}/extracao-ia", headers=h)
+    """Pede a extração e espera o trabalhador terminar; devolve a consulta da execução (ou a
+    resposta do pedido, se ele foi recusado)."""
+    return extrair_e_esperar(cliente, caso_id, captura_id, h)
 
 
 def _resposta(*itens) -> str:
@@ -1557,7 +1573,9 @@ def test_h22_trecho_inventado_valor_inventado_e_esquema_invalido_sao_recusados(t
         assert sugestoes[0]["confianca"] == 0.9 and sugestoes[1]["confianca"] is None
         # Nenhuma entidade nasceu da extração: sugestão não é entidade.
         assert cliente.get(f"/casos/{caso_id}/entidades", headers=H_ANA).json() == antes
-        auditada = _entradas(app, "ia.extrair")[0]
+        auditada = _desfecho(app)
+        assert (auditada.usuario, auditada.acao) == ("extrator", "ia.extracao_concluida")
+        assert auditada.detalhes["solicitada_por"] == "ana"
         assert auditada.detalhes["motivos_de_recusa"] == [
             "campo_fora_do_trecho",
             "caractere_de_controle",
@@ -1919,13 +1937,18 @@ def test_h22_execucao_registra_modelo_versao_e_parametros(tmp_path):
             "sha256:abc123",
         )
         assert extracao["parametros"]["temperature"] == 0 and extracao["parametros"]["seed"] == 0
-        assert extracao["parametros"]["tamanho_bloco"] == 6000
+        # 700 tokens estimados x 3 caracteres por token (os padrões da configuração).
+        assert extracao["parametros"]["tamanho_bloco"] == 2100
+        assert extracao["parametros"]["bloco_tokens"] == 700
         assert extracao["prompt_sha256"] == ia.PROMPT_SHA256 and extracao["usuario"] == "ana"
         assert extracao["captura_sha256"] == hashlib.sha256(EDITAL.encode()).hexdigest()
         assert extracao["sugestoes"][0]["modelo"] == "modelo-sintetico:7b"
         # O texto enviado ao modelo é o da captura (e só ele).
         assert provedor.blocos_recebidos == [EDITAL]
-        d = _entradas(app, "ia.extrair")[0].detalhes
+        pedido = _entradas(app, "ia.extrair")[0]
+        assert pedido.usuario == "ana" and pedido.detalhes["situacao"] == "na_fila"
+        assert pedido.detalhes["extracao_id"] == extracao["id"]
+        d = _desfecho(app).detalhes
         assert (d["modelo"], d["modelo_versao"], d["servidor_versao"]) == (
             "modelo-sintetico:7b",
             "sha256:abc123",
@@ -1961,11 +1984,12 @@ def test_h22_resposta_fora_do_formato_derruba_a_execucao_sem_criar_sugestao(tmp_
     with TestClient(app) as cliente:
         caso_id, captura_id = _caso_com_edital(cliente)
         r = _extrair(cliente, caso_id, captura_id)
-        assert r.status_code == 502 and "registrada" in r.json()["detail"]
+        assert r.status_code == 200 and r.json()["situacao"] == "falha"
         assert cliente.get(f"/casos/{caso_id}/sugestoes-ia", headers=H_ANA).json() == []
         falha = cliente.get(f"/casos/{caso_id}/extracoes-ia", headers=H_ANA).json()[0]
         assert falha["situacao"] == "falha" and "esquema" in falha["motivo"]
-        assert _entradas(app, "ia.extrair")[0].detalhes["situacao"] == "falha"
+        assert falha["progresso"]["blocos_falhos"] == 1 and falha["progresso"]["retomavel"]
+        assert _entradas(app, "ia.extracao_falha")[0].detalhes["situacao"] == "falha"
 
 
 def test_h22_aceitar_ou_recusar_e_decisao_do_investigador_auditada(tmp_path):
@@ -2108,7 +2132,7 @@ def test_h22_blocos_e_provedor_falso_padrao(tmp_path):
     # Nada do texto se perde nem muda de ordem, e nenhum bloco passa do tamanho.
     assert "".join(blocos) == texto.rstrip("\n")
     assert all(0 < len(b) <= 10 for b in blocos) and len(blocos) == 5
-    app = _app_ia(tmp_path, ProvedorFalso(), ia_tamanho_bloco=300)
+    app = _app_ia(tmp_path, ProvedorFalso(), ia_bloco_tokens=100, ia_sobreposicao_tokens=0)
     with TestClient(app) as cliente:
         caso_id, captura_id = _caso_com_edital(cliente)
         extracao = _extrair(cliente, caso_id, captura_id).json()
@@ -2184,7 +2208,7 @@ def _ollama(modelos: list[dict], conteudo: str = '{"itens": []}', vistos: list |
 MODELO_LOCAL = {"name": "modelo-sintetico:7b", "model": "modelo-sintetico:7b", "digest": "d" * 64}
 
 
-def test_h22_provedor_ollama_envia_esquema_sem_fluxo_e_identifica_o_modelo():
+def test_h22_provedor_ollama_envia_esquema_com_fluxo_e_identifica_o_modelo():
     vistos: list[httpx.Request] = []
     provedor = _ollama([MODELO_LOCAL], _resposta(ITEM_VALOR), vistos)
     identidade = provedor.identidade()
@@ -2196,16 +2220,17 @@ def test_h22_provedor_ollama_envia_esquema_sem_fluxo_e_identifica_o_modelo():
     assert identidade.servidor_versao == "0.99.0"
     geracao = provedor.gerar(ia.INSTRUCOES, EDITAL, ia.ESQUEMA_RESPOSTA)
     assert json.loads(geracao.texto)["itens"][0]["valor"] == "R$ 1.234.567,89"
-    assert geracao.metricas == {"done_reason": "stop"}
+    assert geracao.metricas["done_reason"] == "stop" and geracao.metricas["primeiro_token_ms"] >= 0
+    assert set(geracao.metricas) == {"done_reason", "primeiro_token_ms"}
     chat = next(p for p in vistos if p.url.path == "/api/chat")
     corpo = json.loads(chat.content)
     assert chat.method == "POST" and chat.url.host == "127.0.0.1"
-    assert corpo["model"] == "modelo-sintetico:7b" and corpo["stream"] is False
+    assert corpo["model"] == "modelo-sintetico:7b" and corpo["stream"] is True
     assert corpo["format"] == ia.ESQUEMA_RESPOSTA
     assert corpo["options"] == {"temperature": 0.0, "seed": 0}
     assert [m["role"] for m in corpo["messages"]] == ["system", "user"]
     assert corpo["messages"][1]["content"] == EDITAL
-    assert provedor.parametros()["stream"] is False
+    assert provedor.parametros()["stream"] is True
 
 
 def test_h22_provedor_ollama_recusa_modelo_remoto_ausente_e_respostas_ruins(tmp_path):
@@ -2237,7 +2262,7 @@ def test_h22_provedor_ollama_recusa_modelo_remoto_ausente_e_respostas_ruins(tmp_
     with TestClient(app) as cliente:
         caso_id, captura_id = _caso_com_edital(cliente)
         r = _extrair(cliente, caso_id, captura_id)
-        assert r.status_code == 502 and "remoto" in r.json()["detail"]
+        assert r.json()["situacao"] == "falha" and "remoto" in r.json()["motivo"]
         assert cliente.get(f"/casos/{caso_id}/sugestoes-ia", headers=H_ANA).json() == []
 
 
@@ -2277,6 +2302,12 @@ METRICAS_FIXAS = {
 CAMPOS_DO_BLOCO = {
     "numero",
     "caracteres",
+    "inicio",
+    "fim",
+    "situacao",
+    "tentativas",
+    "falhas",
+    "trechos_localizados_com_quebra_de_linha",
     "duracao_parede_ms",
     "metricas",
     "itens_recebidos",
@@ -2288,7 +2319,7 @@ CAMPOS_DO_BLOCO = {
 
 def test_h22_metricas_por_bloco_e_totais_chegam_a_execucao_e_a_auditoria(tmp_path):
     provedor = ProvedorFalso(metricas=METRICAS_FIXAS, contexto=4096)
-    app = _app_ia(tmp_path, provedor, ia_tamanho_bloco=300)
+    app = _app_ia(tmp_path, provedor, ia_bloco_tokens=100, ia_sobreposicao_tokens=0)
     with TestClient(app) as cliente:
         caso_id, captura_id = _caso_com_edital(cliente)
         extracao = _extrair(cliente, caso_id, captura_id).json()
@@ -2313,7 +2344,15 @@ def test_h22_metricas_por_bloco_e_totais_chegam_a_execucao_e_a_auditoria(tmp_pat
         assert sum(b["itens_aceitos"] for b in metricas["blocos"]) == extracao["itens_aceitos"] == 2
         # Só números e códigos: nenhum texto do documento vai para as métricas.
         assert "SINT" not in json.dumps(metricas, ensure_ascii=False)
-        assert _entradas(app, "ia.extrair")[0].detalhes["metricas"] == metricas
+        # Na auditoria vai o resumo (totais e uma linha por bloco) e o SHA-256 do registro todo.
+        auditadas = _desfecho(app).detalhes["metricas"]
+        assert auditadas == ia.metricas_para_auditoria(metricas)
+        assert (auditadas["tokens_entrada"], auditadas["tokens_saida"]) == (2 * 2044, 2 * 1070)
+        assert [(b["n"], b["s"], b["te"], b["ts"]) for b in auditadas["blocos"]] == [
+            (1, "concluido", 2044, 1070),
+            (2, "concluido", 2044, 1070),
+        ]
+        assert len(auditadas["metricas_sha256"]) == 64
         lista = cliente.get(f"/casos/{caso_id}/extracoes-ia", headers=H_ANA).json()
         assert lista[0]["metricas"] == metricas
 
@@ -2349,54 +2388,59 @@ def test_h22_duplicata_descartada_e_contada_e_o_total_fecha(tmp_path):
         # A duplicata continua fora das recusas e das sugestões, como antes.
         assert [r["motivo"] for r in extracao["recusas"]] == ["trecho_nao_literal"]
         assert len(extracao["sugestoes"]) == 1
-        assert _entradas(app, "ia.extrair")[0].detalhes["parametros"]["duplicatas_descartadas"] == 2
+        assert _desfecho(app).detalhes["parametros"]["duplicatas_descartadas"] == 2
 
 
-def test_h22_saida_cortada_pelo_limite_de_tokens_vira_aviso_sem_mudar_o_resultado(tmp_path):
+def test_h22_saida_cortada_em_bloco_pequeno_demais_para_dividir_falha_so_esse_bloco(tmp_path):
     cortada = {**METRICAS_FIXAS, "done_reason": "length"}
-    app = _app_ia(tmp_path, ProvedorFalso(metricas=[METRICAS_FIXAS, cortada]), ia_tamanho_bloco=300)
+    app = _app_ia(
+        tmp_path,
+        ProvedorFalso(metricas=[METRICAS_FIXAS, cortada]),
+        ia_bloco_tokens=100,
+        ia_sobreposicao_tokens=0,
+    )
     with TestClient(app) as cliente:
         r = _extrair(cliente, *_caso_com_edital(cliente))
         extracao = r.json()
-        # O JSON do bloco cortado ainda era válido: a execução segue e o aviso fica registrado.
-        assert r.status_code == 200 and extracao["situacao"] == "sucesso"
-        assert extracao["itens_aceitos"] == 2
-        assert extracao["metricas"]["avisos"] == [{"tipo": "saida_cortada", "blocos": [2]}]
-        assert (
-            _entradas(app, "ia.extrair")[0].detalhes["metricas"]["avisos"]
-            == extracao["metricas"]["avisos"]
-        )
+        # A saída cortada não é aproveitada (pode estar incompleta). O bloco tem menos de 400
+        # caracteres e não é dividido: falha sozinho, e o resultado do outro bloco fica.
+        assert r.status_code == 200 and extracao["situacao"] == "concluida_com_falhas"
+        assert extracao["itens_aceitos"] == 1 and len(extracao["sugestoes"]) == 1
+        assert extracao["metricas"]["avisos"] == [
+            {"tipo": "saida_cortada", "blocos": [2]},
+            {"tipo": "blocos_falhos", "blocos": [2]},
+        ]
+        assert extracao["metricas"]["blocos_falhos"] == [{"bloco": 2, "causa": "saida_cortada"}]
+        assert _desfecho(app).detalhes["metricas"]["avisos"] == extracao["metricas"]["avisos"]
 
 
 def test_h22_falha_registra_o_bloco_a_causa_e_o_que_ja_foi_gasto(tmp_path):
-    cortada = {**METRICAS_FIXAS, "done_reason": "length"}
     provedor = ProvedorFalso(
-        [_resposta(), '{"itens": [{"tipo": "valor", "valor": "R$ 1'],
-        metricas=[METRICAS_FIXAS, cortada],
+        [_resposta(), '{"itens": [{"tipo": "valor", "valor": "R$ 1'], metricas=METRICAS_FIXAS
     )
-    app = _app_ia(tmp_path, provedor, ia_tamanho_bloco=300)
+    app = _app_ia(tmp_path, provedor, ia_bloco_tokens=100, ia_sobreposicao_tokens=0)
     with TestClient(app) as cliente:
         caso_id, captura_id = _caso_com_edital(cliente)
-        assert _extrair(cliente, caso_id, captura_id).status_code == 502
+        assert _extrair(cliente, caso_id, captura_id).json()["situacao"] == "concluida_com_falhas"
         falha = cliente.get(f"/casos/{caso_id}/extracoes-ia", headers=H_ANA).json()[0]
         metricas = falha["metricas"]
-        assert falha["situacao"] == "falha" and "bloco 2" in falha["motivo"]
+        assert falha["situacao"] == "concluida_com_falhas" and "bloco 2" in falha["motivo"]
         assert metricas["falha"]["bloco"] == 2 and metricas["falha"]["causa"] == "json_invalido"
         assert metricas["falha"]["duracao_ms"] == metricas["duracao_ms"] >= 0
-        # O primeiro bloco foi processado e perdido: o custo dele fica registrado.
+        # O primeiro bloco foi concluído e gravado; o custo dos dois fica registrado.
         assert (metricas["tokens_entrada"], metricas["tokens_saida"]) == (2 * 2044, 2 * 1070)
-        assert [b["numero"] for b in metricas["blocos"]] == [1, 2]
+        assert [(b["numero"], b["situacao"]) for b in metricas["blocos"]] == [
+            (1, "concluido"),
+            (2, "falho"),
+        ]
         assert (
             "itens_recebidos" in metricas["blocos"][0]
             and "itens_recebidos" not in metricas["blocos"][1]
         )
-        assert metricas["avisos"] == [{"tipo": "saida_cortada", "blocos": [2]}]
+        assert metricas["avisos"] == [{"tipo": "blocos_falhos", "blocos": [2]}]
         assert falha["parametros"]["tamanho_bloco"] == 300
         assert cliente.get(f"/casos/{caso_id}/sugestoes-ia", headers=H_ANA).json() == []
-        assert (
-            _entradas(app, "ia.extrair")[0].detalhes["metricas"]["falha"]["causa"]
-            == "json_invalido"
-        )
+        assert _desfecho(app).detalhes["metricas"]["falha"]["causa"] == "json_invalido"
 
 
 MODELO_COM_DETALHES = {
@@ -2453,7 +2497,8 @@ def test_h22_ollama_metricas_identidade_do_modelo_e_parametros_efetivos(tmp_path
     with TestClient(app) as cliente:
         extracao = _extrair(cliente, *_caso_com_edital(cliente)).json()
         parametros, metricas = extracao["parametros"], extracao["metricas"]
-        assert metricas["blocos"][0]["metricas"] == METRICAS_FIXAS
+        medidas = metricas["blocos"][0]["metricas"]
+        assert medidas == {**METRICAS_FIXAS, "primeiro_token_ms": medidas["primeiro_token_ms"]}
         assert (metricas["tokens_entrada"], metricas["tokens_saida"]) == (2044, 1070)
         # Janela em uso: lida de /api/ps depois da geração (nada foi enviado para mudá-la).
         assert metricas["num_ctx_efetivo"] == 4096
@@ -2468,8 +2513,8 @@ def test_h22_ollama_metricas_identidade_do_modelo_e_parametros_efetivos(tmp_path
             "7.6B",
         )
         assert parametros["modelo_tamanho_bytes"] == 4_683_087_332
-        assert _entradas(app, "ia.extrair")[0].detalhes["parametros"] == parametros
-    # O que vai ao modelo é o mesmo de antes: nem num_ctx, nem num_predict, nem keep_alive.
+        assert _desfecho(app).detalhes["parametros"] == parametros
+    # Provedor montado sem num_ctx, num_predict nem keep_alive: esses campos não são enviados.
     corpo = json.loads(next(p for p in vistos if p.url.path == "/api/chat").content)
     assert corpo["options"] == {"temperature": 0.0, "seed": 0} and "keep_alive" not in corpo
     assert set(corpo) == {"model", "messages", "format", "stream", "options"}
@@ -2494,7 +2539,21 @@ def test_h22_ollama_keep_alive_configurado_e_enviado_e_registrado(tmp_path):
     config = criar_config(tmp_path, ia_extracao_ativa=True, ia_modelo="m", ia_keep_alive="30m")
     assert criar_provedor(config).keep_alive == "30m"
     padrao = criar_provedor(criar_config(tmp_path, ia_extracao_ativa=True, ia_modelo="m"))
-    assert padrao.keep_alive is None and padrao.num_ctx is None and padrao.num_predict is None
+    # A janela e o teto de saída vêm da configuração (IA_NUM_CTX e IA_NUM_PREDICT).
+    assert padrao.keep_alive is None and (padrao.num_ctx, padrao.num_predict) == (8192, 2048)
+    outro = criar_config(
+        tmp_path, ia_extracao_ativa=True, ia_modelo="m", ia_num_ctx=4096, ia_num_predict=512
+    )
+    assert (criar_provedor(outro).num_ctx, criar_provedor(outro).num_predict) == (4096, 512)
+    # O bloco, as instruções e a saída têm de caber na janela.
+    with pytest.raises(ErroConfiguracao, match="IA_NUM_CTX"):
+        criar_config(
+            tmp_path, ia_extracao_ativa=True, ia_modelo="m", ia_num_ctx=2048, ia_num_predict=2048
+        ).validar()
+    with pytest.raises(ErroConfiguracao, match="IA_SOBREPOSICAO_TOKENS"):
+        criar_config(
+            tmp_path, ia_extracao_ativa=True, ia_modelo="m", ia_sobreposicao_tokens=400
+        ).validar()
     with pytest.raises(ValidationError):
         criar_config(tmp_path, ia_keep_alive="cinco minutos")
 
@@ -2503,8 +2562,8 @@ def test_h22_ollama_keep_alive_configurado_e_enviado_e_registrado(tmp_path):
     ("chat", "causa"),
     [
         (
-            lambda p: (_ for _ in ()).throw(httpx.ReadTimeout("tempo esgotado", request=p)),
-            "tempo_esgotado",
+            lambda p: (_ for _ in ()).throw(httpx.ReadTimeout("sem resposta", request=p)),
+            "travamento",
         ),
         (lambda p: (_ for _ in ()).throw(httpx.ConnectError("sem servidor", request=p)), "conexao"),
         (lambda p: httpx.Response(500), "http"),
@@ -2512,11 +2571,11 @@ def test_h22_ollama_keep_alive_configurado_e_enviado_e_registrado(tmp_path):
         (lambda p: httpx.Response(200, json={"done": True}), "resposta_invalida"),
     ],
 )
-def test_h22_ollama_falha_do_servidor_registra_a_causa_e_o_tempo_esgotado(tmp_path, chat, causa):
+def test_h22_ollama_falha_do_servidor_registra_a_causa_e_o_tempo_gasto(tmp_path, chat, causa):
     app = _app_ia(tmp_path, _ollama_com_metricas([], chat=chat))
     with TestClient(app) as cliente:
         caso_id, captura_id = _caso_com_edital(cliente)
-        assert _extrair(cliente, caso_id, captura_id).status_code == 502
+        assert _extrair(cliente, caso_id, captura_id).json()["situacao"] == "falha"
         falha = cliente.get(f"/casos/{caso_id}/extracoes-ia", headers=H_ANA).json()[0]
         assert (
             falha["metricas"]["falha"]["bloco"] == 1
@@ -2535,7 +2594,7 @@ def test_h22_falha_antes_do_primeiro_bloco_nao_tem_numero_de_bloco(tmp_path):
     app = _app_ia(tmp_path, remoto)
     with TestClient(app) as cliente:
         caso_id, captura_id = _caso_com_edital(cliente)
-        assert _extrair(cliente, caso_id, captura_id).status_code == 502
+        assert _extrair(cliente, caso_id, captura_id).json()["situacao"] == "falha"
         falha = cliente.get(f"/casos/{caso_id}/extracoes-ia", headers=H_ANA).json()[0]
         assert falha["metricas"]["falha"]["bloco"] is None
         assert falha["metricas"]["falha"]["causa"] == "modelo_recusado"
@@ -2569,6 +2628,7 @@ TABELAS_H3 = (
     "tarefa_eventos",
     "extracoes_ia",
     "sugestoes_ia",
+    "extracao_ia_blocos",
 )
 
 
@@ -2765,9 +2825,9 @@ def test_postgres_horizonte3_com_o_papel_da_aplicacao(postgres_vazio, tmp_path, 
         v = cliente.get(f"/capturas/{captura_edital}/verificar", headers=ana).json()
         assert v["integra"] is True and v["cifrada"] is True
         # Extração por IA: sugestão, aceitação e entidade.
-        sugestoes = cliente.post(
-            f"/casos/{caso_id}/capturas/{captura_edital}/extracao-ia", headers=ana
-        ).json()["sugestoes"]
+        extracao = extrair_e_esperar(cliente, caso_id, captura_edital, ana).json()
+        assert extracao["situacao"] == "sucesso", extracao
+        sugestoes = extracao["sugestoes"]
         r = cliente.post(
             f"/casos/{caso_id}/sugestoes-ia/{sugestoes[0]['id']}/decisao",
             json={"decisao": "aceita", "justificativa": "Conferido"},

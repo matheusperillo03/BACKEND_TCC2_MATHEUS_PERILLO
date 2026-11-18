@@ -226,6 +226,47 @@ class RecusaIa(BaseModel):
     trecho: str
 
 
+class BlocoExtracaoIa(BaseModel):
+    numero: int
+    # pendente | em_andamento | concluido | falho
+    situacao: str
+    caracteres: int
+    tentativas: int
+    causa: str = ""
+    duracao_ms: int = 0
+    # Bloco que foi dividido ao meio e deu origem a este (saída cortada ou tempo esgotado).
+    pai_numero: int | None = None
+
+
+class ProgressoExtracaoIa(BaseModel):
+    """Andamento de uma execução: só números e códigos, nenhum texto do documento."""
+
+    id: str
+    captura_id: str
+    # na_fila | em_andamento | sucesso | concluida_com_falhas | falha | cancelada | interrompida
+    situacao: str
+    motivo: str = ""
+    ativa: bool
+    retomavel: bool
+    cancelamento_pedido: bool = False
+    posicao_na_fila: int | None = None
+    blocos_total: int
+    blocos_concluidos: int
+    blocos_falhos: int
+    blocos_pendentes: int
+    bloco_atual: int | None = None
+    itens_recebidos: int
+    itens_aceitos: int
+    itens_recusados: int
+    tempo_decorrido_ms: int
+    # ``None`` antes do primeiro bloco concluído e depois do fim.
+    estimativa_restante_ms: int | None = None
+    retomadas: int = 0
+    iniciado_em: str
+    concluido_em: str | None = None
+    blocos: list[BlocoExtracaoIa] = []
+
+
 class ExtracaoIaSaida(BaseModel):
     id: str
     captura_id: str
@@ -248,6 +289,7 @@ class ExtracaoIaSaida(BaseModel):
     usuario: str
     iniciado_em: str
     concluido_em: str | None
+    progresso: ProgressoExtracaoIa | None = None
     sugestoes: list[SugestaoIaSaida] = []
 
 

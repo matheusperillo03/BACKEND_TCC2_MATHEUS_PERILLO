@@ -271,6 +271,7 @@ def test_benchmark_divide_em_blocos_e_segue_depois_de_json_invalido(tmp_path):
         motivo = "length" if chamadas["n"] == 1 else "stop"
         resposta = {
             "message": {"content": conteudo},
+            "done": True,
             "done_reason": motivo,
             "prompt_eval_count": 10,
             "eval_count": 5,
@@ -310,7 +311,7 @@ def test_benchmark_divide_em_blocos_e_segue_depois_de_json_invalido(tmp_path):
         (lambda p: httpx.Response(500), "http"),
         (
             lambda p: (_ for _ in ()).throw(httpx.ReadTimeout("esgotou", request=p)),
-            "tempo_esgotado",
+            "travamento",
         ),
     ],
 )

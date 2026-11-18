@@ -30,7 +30,7 @@ from buscador.documentos import (
 from buscador.ia import servico as ia
 from buscador.ia.falso import ProvedorFalso
 from buscador.modelos import Captura
-from tests.conftest import cabecalhos, corpo_caso, criar_config
+from tests.conftest import cabecalhos, corpo_caso, criar_config, extrair_e_esperar
 
 H_ANA = cabecalhos("tok-analista")
 
@@ -356,7 +356,7 @@ def test_api_rota_de_texto_t10_e_ia_funcionam_sobre_o_texto_extraido_do_pdf(tmp_
         assert alertas[0]["evidencias"][0]["sha256"] == captura["sha256"]
 
         # IA (provedor falso): os trechos e as posições referem-se ao texto extraído.
-        r = cliente.post(f"/casos/{caso_id}/capturas/{captura_id}/extracao-ia", headers=H_ANA)
+        r = extrair_e_esperar(cliente, caso_id, captura_id, H_ANA)
         assert r.status_code == 200, r.text
         extracao = r.json()
         assert extracao["situacao"] == "sucesso" and extracao["itens_aceitos"] == 2
@@ -389,10 +389,13 @@ def test_api_pdf_escaneado_fica_na_custodia_mas_sem_texto(tmp_path):
             f"/casos/{caso_id}/alertas/executar", json={"tipologias": ["T10"]}, headers=H_ANA
         )
         assert r.status_code == 200 and r.json() == []
-        r = cliente.post(f"/casos/{caso_id}/capturas/{captura_id}/extracao-ia", headers=H_ANA)
-        assert r.status_code >= 400 and "sem camada de texto" in json.dumps(
-            r.json(), ensure_ascii=False
-        )
+        r = extrair_e_esperar(cliente, caso_id, captura_id, H_ANA)
+        assert r.json()["situacao"] == "falha" and "sem camada de texto" in r.json()["motivo"]
+        assert r.json()["metricas"]["falha"] == {
+            "bloco": None,
+            "causa": "texto_ilegivel",
+            "duracao_ms": r.json()["metricas"]["duracao_ms"],
+        }
         assert cliente.get(f"/casos/{caso_id}/sugestoes-ia", headers=H_ANA).json() == []
 
 

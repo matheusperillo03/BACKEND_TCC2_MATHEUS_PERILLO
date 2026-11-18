@@ -13,6 +13,7 @@ declarado em ``IA_HOSTS_LOCAIS`` (``Configuracao.validar_ia``).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -23,11 +24,42 @@ class ErroProvedor(Exception):
     """O provedor não respondeu, respondeu com erro ou não pode ser usado (ex.: modelo remoto).
 
     ``causa`` é um código estável, gravado nas métricas da execução que falhou:
-    ``tempo_esgotado``, ``conexao``, ``http``, ``resposta_invalida`` ou ``modelo_recusado``."""
+    ``tempo_esgotado`` (o bloco passou do tempo limite), ``travamento`` (nenhum token dentro do
+    prazo), ``conexao``, ``http``, ``resposta_invalida`` ou ``modelo_recusado``.
 
-    def __init__(self, mensagem: str, causa: str = "provedor") -> None:
+    ``transitoria`` diz se vale repetir a mesma chamada (servidor fora do ar, travamento, erro
+    5xx). Tempo esgotado não é transitório: a mesma chamada levaria o mesmo tempo."""
+
+    def __init__(self, mensagem: str, causa: str = "provedor", transitoria: bool = False) -> None:
         super().__init__(mensagem)
         self.causa = causa
+        self.transitoria = transitoria
+
+
+class GeracaoInterrompida(Exception):
+    """A geração foi interrompida a pedido (``motivo``: ``cancelada`` ou ``parando``)."""
+
+    def __init__(self, motivo: str) -> None:
+        super().__init__(motivo)
+        self.motivo = motivo
+
+
+@dataclass(frozen=True)
+class Controle:
+    """Limites de UMA geração (um bloco) e o pedido de interrupção.
+
+    ``limite_segundos``: tempo total da geração. ``sem_token_segundos``: tempo máximo sem
+    receber nada do servidor (travamento). ``interromper`` é consultado enquanto os tokens
+    chegam e devolve o motivo (``cancelada``, ``parando``) ou ``None``."""
+
+    limite_segundos: float | None = None
+    sem_token_segundos: float | None = None
+    interromper: Callable[[], str | None] | None = None
+
+    def conferir_interrupcao(self) -> None:
+        motivo = self.interromper() if self.interromper is not None else None
+        if motivo:
+            raise GeracaoInterrompida(motivo)
 
 
 @dataclass(frozen=True)
@@ -67,8 +99,13 @@ class Provedor(Protocol):
         """Parâmetros de geração efetivamente enviados (temperatura, semente etc.)."""
         ...
 
-    def gerar(self, instrucoes: str, texto: str, esquema: dict) -> Geracao:
-        """Texto gerado pelo modelo para um bloco (espera-se JSON no ``esquema``) e as métricas."""
+    def gerar(
+        self, instrucoes: str, texto: str, esquema: dict, controle: Controle | None = None
+    ) -> Geracao:
+        """Texto gerado pelo modelo para um bloco (espera-se JSON no ``esquema``) e as métricas.
+
+        Com ``controle``, respeita os limites de tempo (``ErroProvedor``) e o pedido de
+        interrupção (``GeracaoInterrompida``)."""
         ...
 
     def contexto_efetivo(self) -> int | None:
@@ -94,5 +131,7 @@ def criar_provedor(config: Configuracao, transporte=None) -> Provedor | None:
         semente=config.ia_semente,
         timeout_segundos=config.ia_timeout_segundos,
         keep_alive=config.ia_keep_alive.strip() or None,
+        num_ctx=config.ia_num_ctx,
+        num_predict=config.ia_num_predict,
         transporte=transporte,
     )
