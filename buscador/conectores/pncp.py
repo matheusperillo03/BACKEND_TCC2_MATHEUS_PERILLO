@@ -47,6 +47,7 @@ from datetime import date, datetime
 import httpx
 
 from buscador.conectores.base import (
+    AVISO_COLETA_INCOMPLETA,
     Conector,
     ErroConector,
     FalhaTransitoria,
@@ -61,7 +62,7 @@ from buscador.resolucao.normalizacao import CNPJ_BASICO, CNPJ_COMPLETO, somente_
 from buscador.seguranca import carregar_json_estrito, numero_finito, sanitizar_json
 
 CABECALHOS_GUARDADOS = ("content-type", "date", "server", "content-length", "cache-control")
-TAMANHO_PAGINA_PADRAO = 50
+TAMANHO_PAGINA_PADRAO = 500
 MAX_PAGINAS_PADRAO = 5
 STATUS_RETENTAVEIS = {429, 500, 502, 503, 504}
 
@@ -105,7 +106,9 @@ class ConectorPncp(Conector):
     # e esfera/poder do órgão, usados pelas tipologias T5, T8 e T9 e pela coleta de termos.
     # 1.3.0: aceita o CNPJ alfanumérico (letras de A a Z não são mais descartadas);
     # ``cnpjFornecedor`` só com 8 ou 14 posições.
-    versao = "1.3.0"
+    # 1.4.0: ``tamanhoPagina`` padrão passa de 50 para 500 (máximo da API) e a coleta que para
+    # com páginas restantes sai marcada como incompleta, com o que a fonte informou.
+    versao = "1.4.0"
 
     def __init__(
         self,
@@ -222,14 +225,17 @@ class ConectorPncp(Conector):
         resultado = ResultadoColeta(fonte=self.nome)
         valores_invalidos = 0
         pagina = 1
+        # O que a fonte informou na última página lida, para dizer o que faltou se a coleta parar.
+        restantes = 0
+        total_paginas = total_registros = None
+        parada = ""
         inicio = self.relogio()
         with self._cliente() as cliente:
             while pagina <= max_paginas:
                 if pagina > 1 and self.relogio() - inicio > self.prazo_total_segundos:
-                    resultado.avisos.append(
-                        f"Coleta interrompida antes da página {pagina}: prazo total de "
-                        f"{self.prazo_total_segundos:g} s esgotado (PNCP_PRAZO_TOTAL_SEGUNDOS); "
-                        "pode haver mais páginas no período."
+                    parada = (
+                        f"o prazo total de {self.prazo_total_segundos:g} s esgotou antes da "
+                        f"página {pagina} (PNCP_PRAZO_TOTAL_SEGUNDOS)"
                     )
                     break
                 consulta = {
@@ -297,15 +303,32 @@ class ConectorPncp(Conector):
                         continue
                     resultado.registros.append(registro)
 
-                restantes = numero_finito(corpo.get("paginasRestantes")) or 0
+                restantes = int(numero_finito(corpo.get("paginasRestantes")) or 0)
+                total_paginas = numero_finito(corpo.get("totalPaginas"))
+                total_registros = numero_finito(corpo.get("totalRegistros"))
                 if restantes <= 0 or corpo.get("empty"):
                     break
                 pagina += 1
             else:
-                resultado.avisos.append(
-                    f"Coleta interrompida no limite de max_paginas={max_paginas}; "
-                    "pode haver mais páginas no período."
-                )
+                parada = f"a coleta parou no limite de max_paginas={max_paginas}"
+        if parada:
+            # Só chega aqui com ``paginasRestantes > 0`` na última página lida: há contratos do
+            # período que não entraram no caso. O aviso vai na frente dos demais.
+            resultado.incompleta = True
+            resultado.paginas_restantes = restantes
+            informado = (
+                f" O PNCP informa {int(total_registros)} contrato(s) em {int(total_paginas)} "
+                "página(s) no período."
+                if total_registros is not None and total_paginas is not None
+                else ""
+            )
+            resultado.avisos.insert(
+                0,
+                f"{AVISO_COLETA_INCOMPLETA} {parada}; {len(resultado.capturas)} página(s) "
+                f"lida(s) e {restantes} página(s) restante(s) NÃO coletada(s).{informado} "
+                "Aumente 'max_paginas', reduza o período ou filtre por 'cnpjOrgao' e colete de "
+                "novo.",
+            )
         if valores_invalidos:
             resultado.avisos.append(
                 f"{valores_invalidos} contrato(s) com 'valorGlobal' não numérico ou não finito: "

@@ -42,7 +42,8 @@ class ParametrosPncp(_Parametros):
     cnpjOrgao: Documento | None = None
     # O teto efetivo é PNCP_MAX_PAGINAS, conferido pelo conector.
     max_paginas: int = Field(default=5, ge=1, le=1000)
-    tamanhoPagina: int = Field(default=50, ge=10, le=500)
+    # 500 é o máximo da API (OpenAPI do PNCP, conferida em 18/11/2026): menos páginas por coleta.
+    tamanhoPagina: int = Field(default=500, ge=10, le=500)
     cnpjFornecedor: Annotated[list[Documento], BeforeValidator(_lista)] = Field(
         default_factory=list, max_length=50
     )

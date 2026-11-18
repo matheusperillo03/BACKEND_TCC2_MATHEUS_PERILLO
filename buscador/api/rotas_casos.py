@@ -15,6 +15,7 @@ from buscador.api import esquemas
 from buscador.api.deps import MAX_IDENTIFICADOR, Contexto, contexto
 from buscador.coleta import AndamentoColeta, ResultadoColetaCaso, executar_coleta
 from buscador.conectores import CONECTORES, ErroConector, FonteNaoConfigurada
+from buscador.conectores.base import AVISO_COLETA_INCOMPLETA
 from buscador.conectores.parametros import validar_parametros
 from buscador.modelos import (
     Alerta,
@@ -132,6 +133,7 @@ def _coleta_para_dict(c: Coleta, captura_ids: list[str]) -> dict:
         "motivo": c.motivo or "",
         "registros": c.registros,
         "avisos": c.avisos or [],
+        "incompleta": any(str(a).startswith(AVISO_COLETA_INCOMPLETA) for a in c.avisos or []),
         "usuario": c.usuario,
         "iniciado_em": c.iniciado_em,
         "concluido_em": c.concluido_em,
@@ -577,6 +579,9 @@ def _coletar_registrando(
             "entidades_novas": resultado.entidades_novas,
             "arestas_novas": resultado.arestas_novas,
         }
+        if resultado.incompleta:
+            detalhes["incompleta"] = True
+            detalhes["paginas_restantes"] = resultado.paginas_restantes
         if recoleta_de is not None:
             diferenca = comparacao.comparar_coletas(ctx.sessao, ctx.custodia, coleta, recoleta_de)
             detalhes["comparacao"] = {

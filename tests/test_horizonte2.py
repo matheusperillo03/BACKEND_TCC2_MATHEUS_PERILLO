@@ -226,7 +226,7 @@ def test_h19_todas_as_coletas_ficam_registradas_com_conector_e_versao(cliente_h2
     conectores = {(c["conector_nome"], c["conector_versao"]) for c in coletas}
     assert conectores == {
         ("cnpj_arquivo", "1.3.0"),
-        ("pncp", "1.3.0"),
+        ("pncp", "1.4.0"),
         ("pncp_termos", "1.0.1"),
         ("portal_transparencia", "1.2.0"),
         ("tse_arquivo", "1.1.0"),

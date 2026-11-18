@@ -138,6 +138,9 @@ class ColetaSaida(BaseModel):
     sugestoes_novas: int
     registros: int
     avisos: list[str]
+    # A coleta parou antes de ler todas as páginas que a fonte informou (dados parciais).
+    incompleta: bool = False
+    paginas_restantes: int | None = None
     # RNF12 (H15) e RF07 (H14): registro da coleta, resultado por fonte e conector usado.
     coleta_id: str
     situacao: Literal["sucesso", "falha", "em_andamento", "nao_configurado"]
@@ -161,6 +164,8 @@ class ColetaRegistro(BaseModel):
     motivo: str
     registros: int
     avisos: list[str]
+    # Derivado dos avisos gravados: há um que começa com "Coleta incompleta:".
+    incompleta: bool = False
     usuario: str
     iniciado_em: str
     concluido_em: str | None

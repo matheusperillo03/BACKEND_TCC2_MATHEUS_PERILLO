@@ -147,7 +147,26 @@ def test_pncp_respeita_max_paginas(registrador, transporte_pncp):
     )
     assert len(resultado.capturas) == 1
     assert len(resultado.registros) == 4
-    assert any("max_paginas" in a for a in resultado.avisos)
+    # Piloto de 18/11/2026: a coleta parcial sai marcada, com o que a fonte informou que falta.
+    assert resultado.incompleta is True and resultado.paginas_restantes == 1
+    aviso = resultado.avisos[0]
+    assert aviso.startswith("Coleta incompleta:") and "max_paginas=1" in aviso
+    assert "1 página(s) lida(s) e 1 página(s) restante(s) NÃO coletada(s)" in aviso
+    assert "9 contrato(s) em 2 página(s)" in aviso
+
+
+def test_pncp_coleta_completa_nao_e_marcada_e_pede_a_pagina_maxima_da_api(
+    registrador, transporte_pncp
+):
+    resultado = _conector(transporte_pncp).coletar(
+        {"dataInicial": "20260101", "dataFinal": "20261231", "max_paginas": 2}, registrador
+    )
+    assert len(resultado.capturas) == 2 and len(resultado.registros) == 9
+    assert resultado.incompleta is False and resultado.paginas_restantes is None
+    assert not any("incompleta" in a for a in resultado.avisos)
+    # Sem ``tamanhoPagina`` no pedido, vale o máximo da API (500), gravado em cada captura.
+    for captura in resultado.capturas:
+        assert captura.metadados["parametros_consulta"]["tamanhoPagina"] == 500
 
 
 def test_pncp_filtra_fornecedor_depois_da_coleta(registrador, transporte_pncp):

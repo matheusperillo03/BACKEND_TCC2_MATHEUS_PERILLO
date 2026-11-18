@@ -373,12 +373,22 @@ Registro = (
 )
 
 
+# Começo fixo do aviso de coleta incompleta: é por ele que o histórico de coletas (que só guarda
+# os avisos) reconhece uma coleta parcial.
+AVISO_COLETA_INCOMPLETA = "Coleta incompleta:"
+
+
 @dataclass
 class ResultadoColeta:
     fonte: str
     capturas: list[Captura] = field(default_factory=list)
     registros: list[Registro] = field(default_factory=list)
     avisos: list[str] = field(default_factory=list)
+    # A coleta parou antes de ler tudo o que a fonte informou (limite de páginas ou prazo): o
+    # caso ficou com dados parciais. O primeiro aviso começa com ``AVISO_COLETA_INCOMPLETA``.
+    incompleta: bool = False
+    # Quantas páginas a fonte disse que faltavam quando a coleta parou (``None`` = não se sabe).
+    paginas_restantes: int | None = None
 
 
 class Conector(ABC):

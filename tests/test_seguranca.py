@@ -1317,6 +1317,8 @@ def test_pncp_para_no_prazo_total(sessao, custodia):
     resultado = conector.coletar({**PERIODO, "max_paginas": 10}, _registrador(sessao, custodia))
     assert len(transporte.chamadas) == 2
     assert any("PNCP_PRAZO_TOTAL_SEGUNDOS" in a for a in resultado.avisos)
+    assert resultado.incompleta is True and resultado.paginas_restantes == 5
+    assert resultado.avisos[0].startswith("Coleta incompleta:")
 
 
 # ==== cnpj_arquivo:coletar:read_bytes-unbounded-file-into-memory ==============================
