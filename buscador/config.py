@@ -44,6 +44,10 @@ def resumo_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+# Tokens reservados, na janela de contexto, para as instruções e o molde de conversa do modelo.
+RESERVA_INSTRUCOES_TOKENS = 600
+
+
 class Configuracao(BaseSettings):
     """Todas as variáveis de ambiente usadas pelo serviço (ver .env.example)."""
 
@@ -98,9 +102,36 @@ class Configuracao(BaseSettings):
     # Nomes de host aceitos além de endereços de loopback e de rede privada (ex.: o nome do
     # serviço no Docker Compose), separados por vírgula.
     ia_hosts_locais: str = ""
+    # Tempo limite das chamadas curtas ao servidor (identidade do modelo, janela em uso) e da
+    # conexão. A geração de cada bloco tem limites próprios (abaixo).
     ia_timeout_segundos: float = Field(default=120.0, gt=0, le=3600)
+    # Tempo que o Ollama mantém o modelo carregado depois da chamada ("5m", "1h", "0", "-1").
+    # Vazio (o padrão): o campo não é enviado e vale o padrão do servidor.
+    ia_keep_alive: str = Field(default="", pattern=r"^\s*(-?\d+|-?(\d+(ms|s|m|h))+)?\s*$")
     ia_max_caracteres: int = Field(default=200_000, ge=1_000, le=5_000_000)
-    ia_tamanho_bloco: int = Field(default=6_000, ge=200, le=100_000)
+    # Janela de contexto pedida ao servidor e teto de tokens gerados por bloco.
+    ia_num_ctx: int = Field(default=8_192, ge=1_024, le=131_072)
+    ia_num_predict: int = Field(default=2_048, ge=64, le=32_768)
+    # Tamanho do bloco e da sobreposição entre blocos vizinhos, em tokens ESTIMADOS: o serviço
+    # não tem o tokenizador do modelo e converte por ``ia_caracteres_por_token``. Em documento
+    # denso (um item por linha) a saída medida passou de 1,4 token por token de texto: 700
+    # tokens de texto deixam a saída perto da metade do teto de ``ia_num_predict``.
+    ia_bloco_tokens: int = Field(default=700, ge=30, le=50_000)
+    ia_sobreposicao_tokens: int = Field(default=40, ge=0, le=5_000)
+    ia_caracteres_por_token: float = Field(default=3.0, ge=1, le=10, allow_inf_nan=False)
+    # Limites por bloco: tempo total da geração e tempo máximo sem receber nenhum token.
+    ia_bloco_tempo_segundos: float = Field(default=600.0, gt=0, le=7_200)
+    ia_sem_token_segundos: float = Field(default=120.0, gt=0, le=3_600)
+    # Repetições de um bloco depois de falha transitória, com espera que dobra a cada uma.
+    ia_repeticoes: int = Field(default=2, ge=0, le=10)
+    ia_espera_repeticao_segundos: float = Field(default=5.0, ge=0, le=600)
+    # Quantas vezes um bloco pode ser dividido ao meio (saída cortada ou tempo esgotado).
+    ia_max_divisoes: int = Field(default=3, ge=0, le=8)
+    # Blocos seguidos com falha transitória que param a execução como "interrompida".
+    ia_falhas_seguidas_max: int = Field(default=3, ge=1, le=100)
+    # Trabalhador em segundo plano. Com mais de um processo da API, ligue em um só.
+    ia_trabalhador_ativo: bool = True
+    ia_trabalhador_intervalo_segundos: float = Field(default=2.0, gt=0, le=300)
     ia_max_itens: int = Field(default=300, ge=1, le=5_000)
     ia_temperatura: float = Field(default=0.0, ge=0, le=2, allow_inf_nan=False)
     ia_semente: int = Field(default=0, ge=0, le=2**31 - 1)
@@ -414,10 +445,32 @@ class Configuracao(BaseSettings):
     def hosts_locais_ia(self) -> frozenset[str]:
         return frozenset(h.strip().lower() for h in self.ia_hosts_locais.split(",") if h.strip())
 
+    def bloco_caracteres(self) -> int:
+        """Tamanho do bloco em caracteres (tokens estimados x caracteres por token)."""
+        return max(1, round(self.ia_bloco_tokens * self.ia_caracteres_por_token))
+
+    def sobreposicao_caracteres(self) -> int:
+        return round(self.ia_sobreposicao_tokens * self.ia_caracteres_por_token)
+
     def validar_ia(self) -> None:
         """A extração por IA só aceita servidor local (soberania dos dados, H22)."""
         if not self.ia_extracao_ativa:
             return
+        # O bloco, as instruções e a saída precisam caber na janela: o que passa dela é
+        # descartado pelo servidor sem aviso.
+        if self.ia_bloco_tokens + RESERVA_INSTRUCOES_TOKENS + self.ia_num_predict > self.ia_num_ctx:
+            raise ErroConfiguracao(
+                "IA_BLOCO_TOKENS + IA_NUM_PREDICT + "
+                f"{RESERVA_INSTRUCOES_TOKENS} (instruções) não cabem em IA_NUM_CTX."
+            )
+        if self.ia_sobreposicao_tokens * 2 > self.ia_bloco_tokens:
+            raise ErroConfiguracao(
+                "IA_SOBREPOSICAO_TOKENS não pode passar da metade de IA_BLOCO_TOKENS."
+            )
+        if self.ia_sem_token_segundos > self.ia_bloco_tempo_segundos:
+            raise ErroConfiguracao(
+                "IA_SEM_TOKEN_SEGUNDOS não pode ser maior que IA_BLOCO_TEMPO_SEGUNDOS."
+            )
         if self.ia_provedor not in ("ollama", "falso"):
             raise ErroConfiguracao("IA_PROVEDOR desconhecido (aceitos: ollama, falso).")
         if self.ia_provedor == "falso":

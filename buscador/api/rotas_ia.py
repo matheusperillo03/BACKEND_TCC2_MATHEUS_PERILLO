@@ -2,6 +2,10 @@
 
 Desligada por padrão (``IA_EXTRACAO_ATIVA=0``): as rotas de execução respondem ``409`` e nada é
 enviado a modelo nenhum. Ligada, só fala com o servidor LOCAL configurado.
+
+A execução roda em SEGUNDO PLANO: ``POST .../extracao-ia`` só põe a execução na fila e responde
+``202``; o trabalhador (``buscador.ia.trabalhador``) processa bloco a bloco. O cliente acompanha
+por ``GET .../extracoes-ia/{id}/progresso`` e pode cancelar e retomar.
 """
 
 from __future__ import annotations
@@ -68,7 +72,7 @@ def _sugestao_para_dict(s: SugestaoIA, extracao: ExtracaoIA) -> dict:
     }
 
 
-def _extracao_para_dict(e: ExtracaoIA, com_sugestoes: bool = False) -> dict:
+def _extracao_para_dict(e: ExtracaoIA, sessao, com_sugestoes: bool = False) -> dict:
     return {
         "id": e.id,
         "captura_id": e.captura_id,
@@ -86,11 +90,40 @@ def _extracao_para_dict(e: ExtracaoIA, com_sugestoes: bool = False) -> dict:
         "itens_aceitos": e.itens_aceitos,
         "itens_recusados": e.itens_recusados,
         "recusas": e.recusas or [],
+        "metricas": e.metricas,
         "usuario": e.usuario,
         "iniciado_em": e.iniciado_em,
         "concluido_em": e.concluido_em,
+        "progresso": servico.progresso(sessao, e),
         "sugestoes": [_sugestao_para_dict(s, e) for s in e.sugestoes] if com_sugestoes else [],
     }
+
+
+def _extracao_do_caso(ctx: Contexto, caso_id: str, extracao_id: str) -> ExtracaoIA:
+    extracao = (
+        ctx.sessao.get(ExtracaoIA, extracao_id) if len(extracao_id) <= MAX_IDENTIFICADOR else None
+    )
+    if extracao is None or extracao.caso_id != caso_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"Execução {extracao_id} não encontrada no caso."
+        )
+    return extracao
+
+
+def _provedor_ligado(request: Request):
+    provedor = request.app.state.provedor_ia
+    if provedor is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "A extração assistida por IA está desligada neste servidor (IA_EXTRACAO_ATIVA=0).",
+        )
+    return provedor
+
+
+def _acordar_trabalhador(request: Request) -> None:
+    trabalhador = getattr(request.app.state, "trabalhador_ia", None)
+    if trabalhador is not None:
+        trabalhador.acordar()
 
 
 @roteador.get("/casos/{caso_id}/capturas/{captura_id}/texto", response_model=esquemas.TextoCaptura)
@@ -135,36 +168,36 @@ def texto_da_captura(caso_id: str, captura_id: str, ctx: Contexto = Depends(cont
 
 
 @roteador.post(
-    "/casos/{caso_id}/capturas/{captura_id}/extracao-ia", response_model=esquemas.ExtracaoIaSaida
+    "/casos/{caso_id}/capturas/{captura_id}/extracao-ia",
+    response_model=esquemas.ExtracaoIaSaida,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 def extrair(caso_id: str, captura_id: str, request: Request, ctx: Contexto = Depends(contexto)):
-    """Roda o modelo local sobre o texto da captura. O que passa nas verificações (esquema,
-    trecho literal, valor amparado no trecho) vira sugestão PENDENTE; o que não passa fica
-    listado em ``recusas`` com o motivo. Nenhuma entidade é criada aqui."""
+    """Põe na fila a extração do modelo local sobre o texto da captura e responde ``202`` com a
+    execução (``situacao: na_fila``). O processamento roda fora desta requisição, um documento
+    por vez; acompanhe por ``GET /casos/{id}/extracoes-ia/{extracao_id}/progresso``.
+
+    Só uma execução ativa por documento: com outra na fila ou em andamento, responde ``409``.
+    O que passar nas verificações (esquema, trecho literal, valor amparado no trecho) vira
+    sugestão PENDENTE conforme cada bloco termina; nenhuma entidade é criada aqui."""
     ctx.caso_aberto(caso_id, "ia.extrair")
-    provedor = request.app.state.provedor_ia
-    if provedor is None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "A extração assistida por IA está desligada neste servidor (IA_EXTRACAO_ATIVA=0).",
-        )
+    provedor = _provedor_ligado(request)
     captura = _captura_do_caso(ctx, caso_id, captura_id)
     if not ctx.custodia.verificar(captura).integra:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "A captura não passou na verificação de integridade; a extração foi recusada.",
         )
-    extracao = servico.executar(
-        ctx.sessao,
-        provedor=provedor,
-        custodia=ctx.custodia,
-        captura=captura,
-        usuario=ctx.usuario.usuario,
-        max_caracteres=ctx.config.ia_max_caracteres,
-        tamanho_bloco=ctx.config.ia_tamanho_bloco,
-        max_itens=ctx.config.ia_max_itens,
-        limites_pdf=ctx.config.limites_pdf(),
-    )
+    try:
+        extracao = servico.criar(
+            ctx.sessao,
+            provedor_nome=provedor.nome,
+            captura=captura,
+            usuario=ctx.usuario.usuario,
+            justificativa=ctx.justificativa,
+        )
+    except servico.ExecucaoEmConflito as conflito:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(conflito)) from conflito
     ctx.auditar(
         "ia.extrair",
         caso_id,
@@ -173,33 +206,20 @@ def extrair(caso_id: str, captura_id: str, request: Request, ctx: Contexto = Dep
             "captura_id": captura.id,
             "captura_sha256": captura.sha256,
             "provedor": extracao.provedor,
-            "modelo": extracao.modelo,
-            "modelo_versao": extracao.modelo_versao,
-            "servidor_versao": extracao.servidor_versao,
-            "parametros": extracao.parametros,
             "prompt_sha256": extracao.prompt_sha256,
             "situacao": extracao.situacao,
-            "motivo": extracao.motivo,
-            "blocos": extracao.blocos,
-            "itens_recebidos": extracao.itens_recebidos,
-            "itens_aceitos": extracao.itens_aceitos,
-            "itens_recusados": extracao.itens_recusados,
-            "motivos_de_recusa": sorted({r["motivo"] for r in extracao.recusas or []}),
         },
     )
     ctx.concluir()
-    if extracao.situacao != "sucesso":
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY,
-            f"A extração falhou e foi registrada ({extracao.id}): {extracao.motivo}",
-        )
-    return _extracao_para_dict(extracao, com_sugestoes=True)
+    _acordar_trabalhador(request)
+    return _extracao_para_dict(extracao, ctx.sessao)
 
 
 @roteador.get("/casos/{caso_id}/extracoes-ia", response_model=list[esquemas.ExtracaoIaSaida])
 def listar_extracoes(caso_id: str, ctx: Contexto = Depends(contexto)):
-    """Execuções da extração no caso (inclusive as que falharam), da mais recente para a mais
-    antiga, com modelo, versão, parâmetros e os itens recusados de cada uma."""
+    """Execuções da extração no caso (inclusive as que falharam e as que ainda estão na fila ou
+    em andamento), da mais recente para a mais antiga, com modelo, versão, parâmetros, o
+    andamento e os itens recusados de cada uma."""
     ctx.caso(caso_id)
     extracoes = list(
         ctx.sessao.execute(
@@ -210,7 +230,104 @@ def listar_extracoes(caso_id: str, ctx: Contexto = Depends(contexto)):
     )
     ctx.auditar("ia.listar_extracoes", caso_id, {"extracoes": len(extracoes)})
     ctx.concluir()
-    return [_extracao_para_dict(e) for e in extracoes]
+    return [_extracao_para_dict(e, ctx.sessao) for e in extracoes]
+
+
+@roteador.get(
+    "/casos/{caso_id}/extracoes-ia/{extracao_id}", response_model=esquemas.ExtracaoIaSaida
+)
+def consultar_extracao(caso_id: str, extracao_id: str, ctx: Contexto = Depends(contexto)):
+    """Uma execução, com as sugestões que ela já produziu, as recusas e as métricas."""
+    ctx.caso(caso_id)
+    extracao = _extracao_do_caso(ctx, caso_id, extracao_id)
+    ctx.auditar(
+        "ia.consultar_extracao",
+        caso_id,
+        {"extracao_id": extracao.id, "situacao": extracao.situacao},
+    )
+    ctx.concluir()
+    return _extracao_para_dict(extracao, ctx.sessao, com_sugestoes=True)
+
+
+@roteador.get(
+    "/casos/{caso_id}/extracoes-ia/{extracao_id}/progresso",
+    response_model=esquemas.ProgressoExtracaoIa,
+)
+def progresso_da_extracao(caso_id: str, extracao_id: str, ctx: Contexto = Depends(contexto)):
+    """Andamento da execução: situação, blocos concluídos, falhos e pendentes, tempo decorrido
+    e estimativa do que falta. Feita para consulta periódica (*polling*).
+
+    Devolve só números e códigos de estado, nenhum conteúdo do documento nem das sugestões; por
+    isso, e para a consulta periódica não encher a trilha, esta rota NÃO grava entrada de
+    auditoria (decisão do autor). O acesso continua restrito aos membros do caso; a criação, o
+    cancelamento, a retomada e o desfecho da execução são auditados."""
+    ctx.caso(caso_id)
+    return servico.progresso(ctx.sessao, _extracao_do_caso(ctx, caso_id, extracao_id))
+
+
+@roteador.post(
+    "/casos/{caso_id}/extracoes-ia/{extracao_id}/cancelar",
+    response_model=esquemas.ProgressoExtracaoIa,
+)
+def cancelar_extracao(caso_id: str, extracao_id: str, ctx: Contexto = Depends(contexto)):
+    """Cancela a execução. Na fila, ela é cancelada na hora; em andamento, o trabalhador para
+    no próximo token recebido e fecha a execução como ``cancelada``. Os blocos já concluídos
+    (e as sugestões deles) ficam gravados, e a execução pode ser retomada depois."""
+    ctx.caso(caso_id)
+    extracao = _extracao_do_caso(ctx, caso_id, extracao_id)
+    try:
+        efeito = servico.pedir_cancelamento(ctx.sessao, extracao, ctx.usuario.usuario)
+    except servico.ExecucaoEmConflito as conflito:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(conflito)) from conflito
+    ctx.auditar(
+        "ia.extracao_cancelar",
+        caso_id,
+        {
+            "extracao_id": extracao.id,
+            "captura_id": extracao.captura_id,
+            "efeito": efeito,
+            "situacao": extracao.situacao,
+        },
+    )
+    ctx.concluir()
+    return servico.progresso(ctx.sessao, extracao)
+
+
+@roteador.post(
+    "/casos/{caso_id}/extracoes-ia/{extracao_id}/retomar",
+    response_model=esquemas.ProgressoExtracaoIa,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retomar_extracao(
+    caso_id: str, extracao_id: str, request: Request, ctx: Contexto = Depends(contexto)
+):
+    """Devolve à fila uma execução ``concluida_com_falhas``, ``falha``, ``cancelada`` ou
+    ``interrompida``. Só os blocos pendentes e os que falharam são processados; os concluídos
+    não são refeitos. O modelo, as instruções e o texto têm de ser os mesmos do início."""
+    ctx.caso_aberto(caso_id, "ia.extracao_retomar")
+    _provedor_ligado(request)
+    extracao = _extracao_do_caso(ctx, caso_id, extracao_id)
+    anterior = extracao.situacao
+    try:
+        servico.retomar(ctx.sessao, extracao, ctx.justificativa)
+    except servico.ExecucaoEmConflito as conflito:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(conflito)) from conflito
+    estado = servico.progresso(ctx.sessao, extracao)
+    ctx.auditar(
+        "ia.extracao_retomar",
+        caso_id,
+        {
+            "extracao_id": extracao.id,
+            "captura_id": extracao.captura_id,
+            "situacao_anterior": anterior,
+            "blocos_pendentes": estado["blocos_pendentes"],
+            "blocos_concluidos": estado["blocos_concluidos"],
+            "retomadas": extracao.retomadas,
+        },
+    )
+    ctx.concluir()
+    _acordar_trabalhador(request)
+    return estado
 
 
 @roteador.get("/casos/{caso_id}/sugestoes-ia", response_model=list[esquemas.SugestaoIaSaida])

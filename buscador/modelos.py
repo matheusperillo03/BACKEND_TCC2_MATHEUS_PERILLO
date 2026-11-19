@@ -420,9 +420,17 @@ class ExtracaoIA(Base):
     """Uma execução da extração assistida por IA sobre uma captura (RF13, RNF05, H22).
 
     Guarda o que permite reconstituir a execução: provedor, modelo, versão (resumo do modelo e
-    versão do servidor), parâmetros e o SHA-256 do prompt e do texto analisado."""
+    versão do servidor), parâmetros e o SHA-256 do prompt e do texto analisado.
+
+    A execução roda em segundo plano. ``situacao``: ``na_fila`` (criada, à espera do
+    trabalhador), ``em_andamento``, ``sucesso``, ``concluida_com_falhas`` (algum bloco falhou;
+    os outros estão gravados), ``falha``, ``cancelada`` ou ``interrompida`` (o serviço parou no
+    meio, ou o servidor do modelo ficou indisponível). As quatro últimas podem ser retomadas."""
 
     __tablename__ = "extracoes_ia"
+    # Uma execução ativa por documento: ``trava`` leva o id da captura enquanto a execução está
+    # na fila ou em andamento e volta a nulo no fim (nulos não colidem no índice único).
+    __table_args__ = (Index("ux_extracoes_ia_trava", "trava", unique=True),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=novo_id)
     caso_id: Mapped[str] = mapped_column(ForeignKey("casos.id"), index=True)
@@ -434,21 +442,70 @@ class ExtracaoIA(Base):
     servidor_versao: Mapped[str] = mapped_column(String(50), default="")
     parametros: Mapped[dict] = mapped_column(JSON, default=dict)
     prompt_sha256: Mapped[str] = mapped_column(String(64), default="")
-    situacao: Mapped[str] = mapped_column(String(15), default="em_andamento")
+    situacao: Mapped[str] = mapped_column(String(30), default="na_fila")
     motivo: Mapped[str] = mapped_column(Text, default="")
+    # Blocos a processar (os que foram divididos ao meio contam pelas metades).
     blocos: Mapped[int] = mapped_column(Integer, default=0)
     itens_recebidos: Mapped[int] = mapped_column(Integer, default=0)
     itens_aceitos: Mapped[int] = mapped_column(Integer, default=0)
     itens_recusados: Mapped[int] = mapped_column(Integer, default=0)
     # Uma linha por item recusado: motivo e resumo do item (o trecho inventado fica registrado).
     recusas: Mapped[list] = mapped_column(JSON, default=list)
+    # O que foi MEDIDO na execução (tempos, tokens, por bloco e no total; a falha, se houve).
+    # Só números e códigos, nunca texto do documento. Nulo nas execuções anteriores à coluna.
+    metricas: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     usuario: Mapped[str] = mapped_column(String(100))
     iniciado_em: Mapped[str] = mapped_column(String(40), default=iso_utc)
     concluido_em: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Justificativa de quem pediu (ou retomou) a execução: vai nas entradas de auditoria que o
+    # trabalhador grava em segundo plano.
+    justificativa: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trava: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Identificador do trabalhador (processo) que assumiu a execução: quem não é mais o dono não
+    # grava resultado (ex.: execução dada por interrompida e retomada por outro).
+    trabalhador: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    enfileirado_em: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    cancelamento_pedido_em: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    cancelamento_pedido_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    retomadas: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     sugestoes: Mapped[list[SugestaoIA]] = relationship(
         back_populates="extracao", order_by="SugestaoIA.posicao_inicio"
     )
+    partes: Mapped[list[ExtracaoIABloco]] = relationship(
+        back_populates="extracao", order_by="ExtracaoIABloco.numero"
+    )
+
+
+class ExtracaoIABloco(Base):
+    """Um bloco do texto de uma execução: o intervalo, a situação e o que foi medido nele.
+
+    O resultado é gravado bloco a bloco: a falha de um não perde os outros, e a retomada só
+    processa os ``pendente`` e os ``falho``. ``dividido``: a saída foi cortada (ou o tempo do
+    bloco esgotou) e o bloco deu lugar a duas metades, que apontam para ele em ``pai_numero``.
+    Só números e códigos: nenhum texto do documento fica aqui."""
+
+    __tablename__ = "extracao_ia_blocos"
+    __table_args__ = (UniqueConstraint("extracao_id", "numero"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=novo_id)
+    extracao_id: Mapped[str] = mapped_column(ForeignKey("extracoes_ia.id"), index=True)
+    numero: Mapped[int] = mapped_column(Integer)
+    pai_numero: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nivel: Mapped[int] = mapped_column(Integer, default=0)
+    # Intervalo [inicio, fim) no texto extraído da captura, em caracteres.
+    inicio: Mapped[int] = mapped_column(Integer)
+    fim: Mapped[int] = mapped_column(Integer)
+    # pendente | em_andamento | concluido | falho | dividido
+    situacao: Mapped[str] = mapped_column(String(15), default="pendente")
+    tentativas: Mapped[int] = mapped_column(Integer, default=0)
+    causa: Mapped[str] = mapped_column(String(30), default="")
+    motivo: Mapped[str] = mapped_column(Text, default="")
+    metricas: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    iniciado_em: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    concluido_em: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+    extracao: Mapped[ExtracaoIA] = relationship(back_populates="partes")
 
 
 class SugestaoIA(Base):

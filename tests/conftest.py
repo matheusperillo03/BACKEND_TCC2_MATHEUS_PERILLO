@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 from urllib.parse import quote
 
@@ -48,6 +49,8 @@ def criar_config(tmp_path: Path, raiz_cnpj: Path | None = None, **extras) -> Con
         "cnpj_dir_base": raiz_cnpj,
         "pncp_espera_retentativa_segundos": 0,
         "coleta_espera_retentativa_segundos": 0,
+        # Extração de editais: sem espera entre as repetições de um bloco.
+        "ia_espera_repeticao_segundos": 0,
         # O agendador do monitoramento não roda em segundo plano nos testes: eles chamam
         # ``Agendador.ciclo`` diretamente.
         "monitoramento_agendador_ativo": False,
@@ -171,3 +174,39 @@ def entidade_por_identificador(
     candidatos = [e for e in r.json() if e["identificador"] == identificador]
     assert candidatos, f"{tipo} {identificador} não encontrado"
     return candidatos[0]
+
+
+SITUACOES_FINAIS_IA = ("sucesso", "concluida_com_falhas", "falha", "cancelada", "interrompida")
+
+
+def esperar_extracao(
+    cliente: TestClient,
+    caso_id: str,
+    extracao_id: str,
+    h: dict | None = None,
+    ate=lambda p: p["situacao"] in SITUACOES_FINAIS_IA,
+    segundos: float = 20.0,
+) -> dict:
+    """Consulta o andamento até ``ate`` valer (por padrão, até a execução terminar)."""
+    limite = time.monotonic() + segundos
+    while True:
+        r = cliente.get(
+            f"/casos/{caso_id}/extracoes-ia/{extracao_id}/progresso", headers=h or cabecalhos()
+        )
+        assert r.status_code == 200, r.text
+        if ate(r.json()):
+            return r.json()
+        assert time.monotonic() < limite, f"a extração não chegou ao estado esperado: {r.json()}"
+        time.sleep(0.01)
+
+
+def extrair_e_esperar(cliente: TestClient, caso_id: str, captura_id: str, h: dict | None = None):
+    """``POST .../extracao-ia`` (202), espera o fim e devolve ``GET .../extracoes-ia/{id}``.
+    Se o pedido foi recusado, devolve a resposta dele."""
+    h = h or cabecalhos()
+    r = cliente.post(f"/casos/{caso_id}/capturas/{captura_id}/extracao-ia", headers=h)
+    if r.status_code != 202:
+        return r
+    extracao_id = r.json()["id"]
+    esperar_extracao(cliente, caso_id, extracao_id, h)
+    return cliente.get(f"/casos/{caso_id}/extracoes-ia/{extracao_id}", headers=h)

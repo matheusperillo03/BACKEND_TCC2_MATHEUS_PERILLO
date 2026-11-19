@@ -39,6 +39,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -351,7 +352,16 @@ def main() -> int:
         )
         r.raise_for_status()
         captura_ata = r.json()["captura_ids"][0]
+        # A extração roda em segundo plano: o pedido responde 202 e o trabalhador processa.
         r = cliente.post(f"/casos/{caso_id}/capturas/{captura_ata}/extracao-ia", headers=cabecalhos)
+        r.raise_for_status()
+        rota_extracao = f"/casos/{caso_id}/extracoes-ia/{r.json()['id']}"
+        limite = time.monotonic() + 60
+        while cliente.get(f"{rota_extracao}/progresso", headers=cabecalhos).json()["ativa"]:
+            if time.monotonic() > limite:
+                raise SystemExit("A extração da demonstração não terminou em 60 s.")
+            time.sleep(0.05)
+        r = cliente.get(rota_extracao, headers=cabecalhos)
         r.raise_for_status()
         extracao = r.json()
         print(

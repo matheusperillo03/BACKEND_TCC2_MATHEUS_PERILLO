@@ -89,6 +89,7 @@ jobs:
         shell: bash  # com `-eo pipefail`: a falha do pytest não se perde no `tee`
         run: |
           uv run pytest -rs -q tests/test_seguranca.py tests/test_horizonte1.py \
-            tests/test_horizonte2.py tests/test_horizonte3.py -k postgres \
+            tests/test_horizonte2.py tests/test_horizonte3.py \
+            tests/test_extracao_segundo_plano.py -k postgres \
             | tee /tmp/postgres.txt
           ! grep -q "skipped" /tmp/postgres.txt

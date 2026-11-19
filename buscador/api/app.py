@@ -29,6 +29,7 @@ from buscador.config import Configuracao, Usuario
 from buscador.custodia import Custodia
 from buscador.db import criar_engine, criar_esquema, criar_fabrica_sessoes, verificar_esquema
 from buscador.ia.provedor import Provedor, criar_provedor
+from buscador.ia.trabalhador import Trabalhador
 from buscador.privacidade import instalar_filtro_de_registros
 from buscador.tipologias.catalogo import catalogo
 
@@ -125,9 +126,17 @@ def criar_app(
         app.state.agendador = agendador
         if config.monitoramento_agendador_ativo:
             agendador.iniciar()
+        # Trabalhador da extração de editais: consome a fila fora das requisições.
+        trabalhador = Trabalhador(app.state, config.ia_trabalhador_intervalo_segundos)
+        app.state.trabalhador_ia = trabalhador
+        # Sobe também com a extração desligada: a partida fecha as execuções que um processo
+        # anterior deixou no meio (e libera a trava do documento).
+        if config.ia_trabalhador_ativo:
+            trabalhador.iniciar()
         try:
             yield
         finally:
+            trabalhador.parar()
             agendador.parar()
 
     # /docs, /redoc e /openapi.json não exigem token: só existem no modo de desenvolvimento.
