@@ -21,7 +21,9 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
     ),
     "T2": (
         "H04",
-        "Endereço normalizado compartilhado por N ou mais empresas, com ao menos uma contratada.",
+        "Endereço normalizado compartilhado por N ou mais empresas, com ao menos uma contratada. "
+        "Só conta estabelecimento com situação cadastral ATIVA (código 02); o que vem sem "
+        "situação informada também conta, com aviso no alerta.",
         "Levantamento com o especialista (RF04); limiar: decisão do autor.",
         ["cnpj_arquivo", "pncp"],
         ["t2_minimo_empresas"],

@@ -303,34 +303,49 @@ def tipologia_t1(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 # ---- T2: endereço compartilhado ---------------------------------------------------------------
 
 
+def _situacao_conta_na_t2(est: dict) -> bool:
+    """Só o estabelecimento ATIVO (código 02) conta no endereço. Código reconhecível e diferente
+    de 02 (nula, suspensa, inapta, baixada) fica de fora. Sem código informado não se sabe se o
+    estabelecimento deixou de existir: pela política de erro da T2 (prefere evitar falso
+    negativo) ele continua contando, e o alerta diz que a situação não foi informada."""
+    codigo = _codigo_situacao(est.get("situacao_cadastral"))
+    return codigo is None or codigo == SITUACAO_ATIVA
+
+
+def _rotulo_situacao_t2(est: dict) -> str:
+    if _codigo_situacao(est.get("situacao_cadastral")) is None:
+        return "situação não informada"
+    return "situação ATIVA"
+
+
 def tipologia_t2(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
     minimo = int(parametros["t2_minimo_empresas"])
     contratadas = {f.id for f, _ in ctx.contratos_com_fornecedor()}
-    por_endereco: dict[str, list[Entidade]] = {}
+    # endereço -> empresa -> estabelecimentos dela que contam naquele endereço.
+    por_endereco: dict[str, dict[str, tuple[Entidade, list[dict]]]] = {}
     for e in ctx.entidades.values():
         if e.tipo != "empresa":
             continue
-        for chave in (e.atributos or {}).get("enderecos_normalizados", []):
+        for est in (e.atributos or {}).get("estabelecimentos", []):
+            chave = est.get("endereco_normalizado")
             # Chave vazia (endereço em branco ou só com a cidade) não identifica um lugar.
-            if chave:
-                por_endereco.setdefault(chave, []).append(e)
+            if chave and _situacao_conta_na_t2(est):
+                por_endereco.setdefault(chave, {}).setdefault(e.id, (e, []))[1].append(est)
 
-    def regra(grupo: tuple[str, list[Entidade]]) -> AlertaDetectado | None:
-        chave, empresas = grupo
-        if len(empresas) < minimo:
+    def regra(grupo: tuple[str, dict[str, tuple[Entidade, list[dict]]]]) -> AlertaDetectado | None:
+        chave, por_empresa = grupo
+        if len(por_empresa) < minimo:
             return None
+        pares = sorted(por_empresa.values(), key=lambda par: par[0].rotulo)
+        empresas = [e for e, _ in pares]
         com_contrato = [e for e in empresas if e.id in contratadas]
         if not com_contrato:
             return None
-        empresas = sorted(empresas, key=lambda e: e.rotulo)
-        legivel = next(
-            (
-                est["endereco"]
-                for e in empresas
-                for est in (e.atributos or {}).get("estabelecimentos", [])
-                if est.get("endereco_normalizado") == chave
-            ),
-            chave,
+        legivel = next((est["endereco"] for _, ests in pares for est in ests), chave)
+        sem_situacao = sum(
+            _codigo_situacao(est.get("situacao_cadastral")) is None
+            for _, ests in pares
+            for est in ests
         )
         nomes = "; ".join(f"{e.rotulo} (CNPJ básico {e.identificador})" for e in empresas)
         nomes_contratadas = ", ".join(e.rotulo for e in com_contrato)
@@ -339,20 +354,26 @@ def tipologia_t2(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
             f"das quais {len(com_contrato)} têm contrato público registrado no PNCP "
             f"({nomes_contratadas}); o limiar configurado é de {minimo} empresas "
             "no mesmo endereço, "
-            "com pelo menos uma contratada."
+            "com pelo menos uma contratada. Só contam os estabelecimentos com situação "
+            "cadastral ATIVA (código 02); os baixados, inaptos, suspensos e nulos ficam de fora."
         )
+        if sem_situacao:
+            motivo += (
+                f" {sem_situacao} estabelecimento(s) deste endereço está(ão) com a situação "
+                "cadastral não informada na fonte e foi(ram) contado(s), porque não há como "
+                "saber se deixou(aram) de existir; convém conferir."
+            )
         evidencias = []
-        for e in empresas:
-            for est in (e.atributos or {}).get("estabelecimentos", []):
-                if est.get("endereco_normalizado") == chave:
-                    evidencias.append(
-                        ctx.evidencia(
-                            est["captura_id"],
-                            f"Estabelecimento {est['cnpj']} de {e.rotulo} no endereço "
-                            f"'{est['endereco']}' "
-                            "(dados abertos do CNPJ, Estabelecimentos)",
-                        )
+        for e, ests in pares:
+            for est in ests:
+                evidencias.append(
+                    ctx.evidencia(
+                        est["captura_id"],
+                        f"Estabelecimento {est['cnpj']} de {e.rotulo} no endereço "
+                        f"'{est['endereco']}', {_rotulo_situacao_t2(est)} "
+                        "(dados abertos do CNPJ, Estabelecimentos)",
                     )
+                )
         for fornecedor, contrato in ctx.contratos_com_fornecedor():
             if fornecedor.id in {e.id for e in com_contrato}:
                 evidencias.append(
@@ -376,6 +397,7 @@ def tipologia_t2(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
                 "t2_minimo_empresas": minimo,
                 "empresas_no_endereco": len(empresas),
                 "empresas_contratadas": len(com_contrato),
+                "estabelecimentos_sem_situacao": sem_situacao,
                 "endereco_normalizado": chave,
             },
         )
