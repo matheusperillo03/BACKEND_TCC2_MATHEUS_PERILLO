@@ -1,0 +1,134 @@
+# Tipologias
+
+[Voltar ao README](../README.md)
+
+## T1 a T4
+
+**Tipologias (RF04, RNF05).** T1: `dataAssinatura - data_inicio_atividade < t1_dias_minimos`. T2: mesmo endereço normalizado em `>= t2_minimo_empresas` empresas, ao menos uma com contrato no PNCP. T3: `valorGlobal / capital_social >= t3_razao_minima` (capital zero com contrato também dispara; capital negativo ou valor não finito na fonte é desconsiderado, com aviso na coleta). T4 (H31): a empresa contratada no PNCP tem, no CNPJ, situação cadastral diferente de ATIVA. Cada alerta traz `motivo` em frase completa com os números, `evidencias` (descrição, fonte, `captura_id`, URL ou arquivo, SHA-256) e `parametros` (limiares usados e valores observados).
+
+*T4 em detalhe.* A regra lê o campo "situação cadastral" da tabela Estabelecimentos do layout oficial, cujos códigos são "01 – NULA, 2 – ATIVA, 3 – SUSPENSA, 4 – INAPTA, 08 – BAIXADA" ([metadados do CNPJ, Receita Federal](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf), conferido em 16/11/2026). O código é comparado como número, porque o arquivo pode trazê-lo com ou sem zero à esquerda. O estabelecimento examinado é o do CNPJ de 14 dígitos do contrato ou, se ele não estiver nos arquivos coletados, a matriz. Dispara para qualquer código diferente de 2, inclusive um código fora do layout (o motivo diz isso). Não dispara para empresa que só aparece no PNCP: falta de dado não é situação irregular. O motivo traz a data do evento da situação e diz se ela é anterior ou posterior à assinatura do contrato (`parametros.situacao_anterior_ao_contrato`); os dois casos disparam, e essa escolha está declarada na política de erro da tipologia. A T4 não tem limiar.
+
+**Severidade e política de erro (RF14, H13).** A severidade (alta, média ou baixa) é da tipologia, e não mais de cada alerta: ela e a política de erro ficam numa tabela única, `buscador/tipologias/politicas.py`, lida pelo motor, pela API e pelo relatório. **Os valores são decisão do autor, a validar com o orientador**; não vêm de norma nem da literatura.
+
+| Tipologia | Severidade | Prefere evitar | Por quê (resumo da política mostrada ao investigador) |
+|---|---|---|---|
+| T4 situação cadastral não ativa | alta | falso negativo | Fato objetivo do cadastro oficial; dispara para qualquer situação não ativa, mesmo posterior ao contrato. O falso positivo vem da defasagem do arquivo e custa pouco conferir |
+| T1 empresa aberta pouco antes do contrato | média | falso negativo | Limiar largo: aponta toda empresa recente, inclusive as regulares |
+| T3 capital social incompatível | média | falso positivo | Só a desproporção grosseira dispara, porque capital baixo é comum em empresas regulares; desproporções menores passam |
+| T2 endereço compartilhado | baixa | falso negativo | Muitas explicações lícitas (contabilidade, coworking); serve para orientar a análise de vínculos |
+
+A lista de alertas e o relatório vêm nessa ordem (severidade, depois tipologia e título). Antes do horizonte 1, a severidade variava dentro da tipologia conforme o valor observado; os valores observados continuam em `parametros`.
+
+**Alerta como pista (RF12, H12).** Todo alerta nasce `pendente`. O investigador confirma ou descarta com `POST /casos/{id}/alertas/{alerta_id}/decisao`, sempre com justificativa. A decisão fica no alerta (`situacao`, `decidido_por`, `decidido_em`, `justificativa_decisao`), numa linha da tabela `alerta_decisoes` e numa entrada `alerta.decidir` da trilha de auditoria, na mesma transação. Rever um alerta é decidir de novo: a nova decisão passa a valer, gera outra linha e outro evento, e as anteriores continuam no histórico (`decisoes`). A tabela `alerta_decisoes` é só de acréscimo também no banco (gatilhos em SQLite e PostgreSQL; no PostgreSQL o papel da aplicação só tem `SELECT` e `INSERT`). Para a decisão sobreviver à reexecução das tipologias, cada alerta tem uma `chave` estável (tipologia, entidades e, na T2, o endereço): a reexecução atualiza o alerta de mesma chave em vez de recriá-lo. Um alerta decidido que deixa de ser detectado não é apagado: fica com `ativo: false`. Na T2, se o conjunto de empresas do endereço muda, a chave muda e nasce um alerta novo, pendente. Qualquer perfil autenticado pode decidir; não há voto duplo nem volta a `pendente`.
+
+## T5 a T10
+
+Fatos legais e de fonte usados aqui foram conferidos em fonte oficial em 16/11/2026 e estão em `docs/sistema/fontes-horizonte2.md` (repositório da monografia). O que não pôde ser conferido está em "Pendências do horizonte 2", em [limitacoes.md](limitacoes.md), e é configurável.
+
+Severidade e política de erro estão na tabela única `buscador/tipologias/politicas.py` (decisão do autor, a validar com o orientador) e aparecem em cada alerta e em `GET /tipologias`. Os parâmetros legais e as listas de termos, com a fonte de cada um, estão em `buscador/tipologias/legislacao.py`.
+
+| Tipologia | Regra | Base | Severidade e erro que prefere evitar |
+|---|---|---|---|
+| **T5** Fracionamento (H32) | Contratações da mesma unidade do órgão (`orgaoEntidade.cnpj` + `unidadeOrgao.codigoUnidade`), no mesmo exercício (ano da assinatura), de objetos de mesma natureza, cada uma abaixo do limite de dispensa, cuja soma atinge o limite. Usa `valorInicial` (ou `valorGlobal`, se faltar, dizendo qual). "Mesma natureza" é o critério `T5_CRITERIO_NATUREZA`: `fornecedor_e_categoria` (padrão: mesmo fornecedor e mesma `categoriaProcesso`), `categoria` ou `fornecedor`. Inciso I (obras e serviços de engenharia) quando todas as contratações do grupo são das categorias 7 ou 9; senão, inciso II | Lei 14.133/2021, art. 75, I e II, e § 1º. Limites de 2026: R$ 130.984,20 (inciso I) e R$ 65.492,11 (inciso II), Anexo do [Decreto 12.807/2025](https://www.planalto.gov.br/ccivil_03/_ato2023-2026/2025/decreto/d12807.htm). Outros exercícios: `T5_LIMITES_DISPENSA`; sem limite para o ano, os contratos daquele ano não são avaliados. Categorias: Manual de Integração do PNCP, seção 7.21 | média; falso positivo |
+| **T6** Empresa sancionada (H33) | Contratada com registro no CEIS ou no CNEP cujo período (`dataInicioSancao` a `dataFimSancao`; sem data final = em aberto) cobre a data de assinatura. Sem data de assinatura ou de início, não avalia | Cadastros CEIS e CNEP (Portal da Transparência) | alta; falso negativo |
+| **T7** Sócio servidor (H34) | Sócio pessoa física da contratada cujos seis dígitos visíveis do CPF **e** o nome normalizado são iguais aos de um servidor do órgão contratante. Um alerta por sócio, servidor, empresa e órgão. **Possível coincidência, nunca identificação** | Levantamento com o especialista (RF04); CPF descaracterizado no layout do CNPJ | alta; falso positivo |
+| **T8** Aditivo acima do limite (H35) | Soma de `valorAcrescido` positivo dos termos (menos os marcados com `qualificacaoAcrescimoSupressao = false`) acima de 25% do `valorInicial`; 50% quando o objeto do contrato indica reforma de edifício ou de equipamento. **Não usa `valorGlobal` nem `valorAcumulado`** (não foi confirmado se já somam os termos) | Lei 14.133/2021, art. 125 | média; falso negativo |
+| **T9** Doador contratado (H39) | Doador de campanha de candidato eleito cuja empresa assinou contrato, em data igual ou posterior à da doação, com órgão do ente do candidato. Doador pessoa jurídica: a própria empresa (CNPJ). Doador pessoa física: **possível coincidência** com um sócio (seis dígitos visíveis do CPF e nome normalizado). Ente: município (`NM_UE` e UF iguais aos do órgão, que é municipal ou sem esfera informada), UF (`SG_UE` igual à UF e órgão estadual ou distrital) ou União (`SG_UE = BR` e órgão federal) | Levantamento com o especialista (RF04); prestação de contas do TSE | média; falso positivo |
+| **T10** Cláusula restritiva (H36) | Texto do edital com uma das expressões regulares explícitas (sem modelo de linguagem). Um alerta por edital e por regra, com cada ocorrência: linha, coluna, posição do caractere, trecho literal e contexto. Regras do código: "certidão negativa de quitação" e "certidão de quitação" (com ou sem acentos, atravessando quebra de linha); outras em `T10_EXPRESSOES_EXTRAS` | Manual da Alice (CGU, 2025), seção 2.2, exemplos citados no backlog | baixa; falso negativo |
+
+Toda explicação diz a regra, o motivo com os números do caso, as limitações e traz as evidências ligadas às capturas (fonte, origem e SHA-256). T5, T8 e T9 dizem no motivo que são indício a verificar.
+
+**Fixtures sintéticas** (`tests/fixtures/h2`, geradas por `scripts/gerar_fixtures_h2.py`; apoiam-se nas empresas e nos sócios de `tests/fixtures/cnpj`). O órgão é a "PREFEITURA SINTETICA DE EXEMPLOPOLIS" (municipal, GO), com dez contratos de 2026:
+
+| Tipologia | Dispara | Não dispara |
+|---|---|---|
+| T5 | DELTA: três serviços de R$ 30 mil (soma R$ 90 mil, limite do inciso II R$ 65.492,11) | EPSILON: duas compras de R$ 20 mil (soma abaixo do limite). ALFA: duas obras de R$ 50 mil (soma R$ 100 mil, abaixo do limite do inciso I) |
+| T6 | ZETA: CEIS de 01/01/2025 a 01/01/2027, contrato de 01/03/2026 | ETA: CNEP de 2020 a 2021, contrato de 2026 |
+| T7 | Servidor "RICARDO FICTICIO LIMA", `***666666**`, sócio de DELTA, EPSILON e ZETA (três alertas). O CPF vem completo na carga (DV inválido) e só o miolo é guardado | "PEDRO EXEMPLO ALVES" com outros dígitos (homônimo de um sócio); servidora sem vínculo |
+| T8 | ZETA: aditivos de R$ 20 mil e R$ 10 mil sobre R$ 100 mil (30%) | ETA: reforma de edifício, aditivo de 30% (limite de 50%). MU: aditivo de 20%; o apostilamento de R$ 50 mil não é acréscimo |
+| T9 | ETA (pessoa jurídica) doou ao prefeito eleito de Exemplopolis e é contratada; doador "RICARDO FICTICIO LIMA" possivelmente coincide com o sócio de DELTA, EPSILON e ZETA (três alertas) | Candidata não eleita; candidato eleito de outro município; doadora homônima com outros dígitos; receita de "Recursos próprios" (ignorada na coleta) |
+| T10 | `edital_restritivo.txt`: as duas expressões, uma delas atravessando a quebra de linha | `edital_regular.txt` ("regularidade fiscal", "quitação de eventuais multas") |
+
+## Lavagem de dinheiro e ocultação (tipologias L e combinação)
+
+As tipologias T1 a T10 sinalizam possíveis infrações antecedentes em contratações. As tipologias **L** sinalizam possível ocultação pela interposição de pessoas e empresas (Lei nº 9.613/1998, art. 1º). Todas são **indício cadastral**: nenhuma prova lavagem, e todo alerta continua sendo pista (RF12). Os sinais financeiros (depósitos, "correntes", beneficiário final de operação) não são verificáveis com dado aberto. As fichas, com o critério e a fonte de cada uma, estão em `docs/lavagem/tipologias-lavagem.md` e `docs/lavagem/fontes.md` (monografia); no código, em `buscador/tipologias/lavagem.py`. **Os limiares são decisão do autor, a validar com o orientador.**
+
+### Tipologias sobre dados já coletados
+
+| Tipologia | Regra | Base | Severidade e erro que prefere evitar |
+|---|---|---|---|
+| **L1** Endereço de registro em massa | Endereço normalizado **com o complemento** em que `L1_MINIMO_ESTABELECIMENTOS` (5) ou mais empresas têm estabelecimento ATIVO, mesmo sem contrato. Marca `abertura_concentrada` quando `L1_MINIMO_ABERTAS_NA_JANELA` (3) ou mais iniciaram a atividade em `L1_JANELA_ABERTURA_DIAS` (180). Extensão da T2 | FATF/Egmont (2018), Anexo E, itens 4 e 11; Velasco et al. (2021), seção 3.1 | baixa; falso negativo |
+| **L3** Mesmo administrador em muitas empresas | Mesma **pessoa provável** (seis dígitos visíveis do CPF e nome normalizado) com qualificação de administração, ou como representante legal, em `L3_MINIMO_EMPRESAS` (5) ou mais empresas, das quais `L3_MINIMO_ABERTAS_NA_JANELA` (3) abertas em `L3_JANELA_MESES` (12) | FATF/Egmont (2018), itens 4 e 10; Carta Circular BCB 4.001/2020, III, h; Fronzetti Colladon e Remondi (2017); Lei 12.846/2013, art. 5º, III | média; falso positivo |
+| **L4** Cadeia societária em camadas | Empresa sem pessoa física no primeiro nível do quadro e com `L4_MINIMO_NIVEIS` (2) ou mais níveis de sócio pessoa jurídica. Informa em que a cadeia termina (pessoa física, sócio estrangeiro ou pessoa jurídica sem quadro nos dados) | FATF/Egmont (2018), item 8; FATF (2011), § 47; Lei 12.846/2013, art. 5º, III | média; falso positivo |
+| **L5** Sócio estrangeiro (nível 1) | Empresa com sócio de identificador 3 (estrangeiro) no CNPJ. **Sem lista de países**: o nível 2 depende da lista oficial, não conferida | FATF/Egmont (2018), item 4 | baixa; falso negativo |
+| **L7** Fundadores substituídos | Contratada em que nenhum sócio atual entrou até `L7_DIAS_APOS_ABERTURA` (30) dias depois do início da atividade e a entrada mais recente antecede um contrato em até `L7_MESES_ANTES_CONTRATO` (12) meses. Só o retrato único; sócio sem data de entrada impede a regra. **Não avalia** naturezas jurídicas da administração pública (grupo 1xxx) nem 2011 Empresa Pública e 2038 Sociedade de Economia Mista, e **só conta qualificações de sócio ou titular** (ver nota abaixo) | FATF/Egmont (2018), item 7 | média; falso positivo |
+| **L8** Recém-aberta com sócio possivelmente agente público | A mesma contratada dispara a T1 **e** a T7. Composição, sem coleta nova. **Possível coincidência** | COAF, Casos e Casos (ANR 2021), tipologia 2.7 ("sem empregados" não é verificável) | alta; falso positivo |
+| **L10** Vínculo com empresa sancionada (CEIS/CNEP) | Contratada sem sanção própria vigente que divide sócio-administrador provável ou endereço normalizado com empresa de sanção vigente na data do contrato. Extensão da T6 | FATF/Egmont (2018), item 3; Velasco et al. (2021); Lei 12.846/2013, art. 5º, IV, e | média; falso negativo |
+| **L14** Faixa etária atípica (**sinal fraco**) | Contratada cujos sócios-administradores estão **todos** nas faixas `L14_FAIXAS_ATIPICAS` (1, 2 e 9: até 20 anos e mais de 80), com valor contratado acima de `L14_VALOR_MINIMO` (R$ 100.000,00). Só a faixa é usada, nunca a idade | FATF/Egmont (2018), itens 3 e 10 | baixa; falso positivo |
+| **L15** Muitas atividades econômicas (**sinal fraco**) | Contratada com `L15_MINIMO_CNAES` (20) ou mais CNAEs, ou contratos em `L15_MINIMO_CATEGORIAS` (4) ou mais categorias de objeto | Velasco et al. (2021), seção 3.2 | baixa; falso negativo |
+
+- **L7, naturezas e qualificações (decisão do autor, depois do piloto com dados reais de 18/11/2026):** o quadro dos dados abertos do CNPJ mistura sócios e administradores sem participação. Numa empresa pública, os "sócios" são diretores e o presidente (qualificações 10 e 16), trocados a cada gestão, e a regra disparava sem que houvesse troca de sócios. Por isso a L7 (a) não avalia as naturezas do grupo 1xxx (administração pública), 2011 (Empresa Pública) e 2038 (Sociedade de Economia Mista), conferidas na tabela de domínio Naturezas do arquivo de 11/2026; e (b) considera só as qualificações de sócio ou titular da tabela de domínio Qualificações (22 a 26, 28 a 31, 34, 37, 38, 47 a 50, 52, 53, 55 a 58, 65 a 68, 74, 78 e 79; lista `L7_QUALIFICACOES_SOCIO` em `buscador/tipologias/lavagem.py`). Administrador sem participação (05, 08, 10, 16 e outros) não conta nem como sócio novo nem como fundador; registro do quadro sem qualificação informada impede a regra. Nesse caso a L7 não dispara, mas a execução registra um aviso por empresa ("L7 não avaliada para <CNPJ básico>: N registro(s) do QSA sem qualificação."), gravado no caso (`avisos_tipologias`, devolvido por `GET /casos/{id}`) e nos detalhes da entrada `alerta.executar` da auditoria; cada execução substitui os avisos das tipologias que rodou. As duas listas são constantes do código, não variáveis de ambiente. O alerta registra `socios_considerados`, `administradores_sem_participacao` e `natureza_juridica`.
+- **Administração** é a lista `QUALIFICACOES_ADMINISTRACAO` (05 Administrador, 10 Diretor, 16 Presidente, 28 Sócio-Gerente, 49 Sócio-Administrador, 50 Empresário, 65 Titular), da tabela de domínio Qualificações do CNPJ.
+- **Sinal fraco** (`sinal_fraco: true` no catálogo e no alerta): sozinho não indica nada.
+- **Pessoas:** vale a regra do RF02 e da T7. Seis dígitos e o nome dão "pessoa provável" ou "possível coincidência", nunca identificação, e nada é fundido. Sobrenome igual não entra em regra nenhuma (parentesco não é dado aberto).
+- **API:** `GET /tipologias` e os alertas ganham `grupo` (`contratacao`, `lavagem` ou `combinacao`) e `sinal_fraco`. `POST /casos/{id}/alertas/executar` aceita os códigos novos em `tipologias` (até 30 itens) e os limiares numéricos novos em `parametros` (os nomes das variáveis acima, em minúsculas).
+- **Dados novos guardados na resolução:** em cada estabelecimento, `cnaes_secundarios`, `endereco_com_complemento`, `pais` e `nome_cidade_exterior`; em cada vínculo `socio_de`, `pais`, `faixa_etaria` e `qualificacao_representante`. Casos coletados antes desta versão precisam de nova coleta do CNPJ para a L15 e para a separação por complemento da L1.
+
+### Tipologias com coleta pequena (L6, L10 nas partes CEAF e CEPIM, e L16)
+
+| Tipologia | Regra | Base | Severidade e erro que prefere evitar |
+|---|---|---|---|
+| **L6** Porte ou MEI incompatível | Soma do valor dos contratos assinados no ano-calendário (valor inicial; sem ele, o global) **acima** do limite legal de receita do regime naquele ano. MEI: opção e datas da tabela Simples, só para contratos assinados enquanto a opção valia. Fora do MEI: porte do cadastro (01 microempresa, 03 pequeno porte). No ano de início de atividade, limite proporcional aos meses (MEI, ME e EPP). Sem tolerância; o alerta diz a faixa do excesso (até 20% ou acima). Um alerta por empresa, ano e regime | Velasco et al. (2021), seção 3.2; LC 123/2006, arts. 3º e 18-A; LC 238/2026, arts. 2º e 10 | média; falso positivo |
+| **L10** (CEPIM e CEAF) | CEPIM: a entidade impedida conta como "sancionada" no vínculo por sócio ou endereço (o cadastro não tem período, e o alerta diz isso). CEAF: sócio de contratada ou de convenente com os mesmos seis dígitos do CPF e o mesmo nome de uma pessoa expulsa. **Possível coincidência** | FATF/Egmont (2018), item 3 | média; falso negativo |
+| **L16** Entidade sem fins lucrativos convenente | Convenente de natureza jurídica em `L16_NATUREZAS_SEM_FINS_LUCRATIVOS` (3069, 3301, 3999) com ao menos um sinal: (a) aberta menos de `L16_DIAS_MINIMOS` (180) dias antes da vigência; (b) registro no CEPIM; (c) dirigente que possivelmente coincide com servidor do órgão concedente; (d) dirigente que também é sócio de empresa no mesmo endereço, do mesmo CNAE principal ou recém-aberta | COAF, Casos e Casos (ANR 2021), 2.1, 2.8 e 2.9; Velasco et al. (2021), seção 5 | média; falso negativo |
+
+**Limites da L6** (`buscador/tipologias/legislacao.py`, conferidos no texto do Planalto em 18/11/2026):
+
+| Regime | Ano-calendário | Limite anual | Fonte |
+|---|---|---|---|
+| MEI | 2012 a 2017 | R$ 60.000,00 (R$ 5.000,00 por mês no ano de início) | LC 123/2006, art. 18-A, §§ 1º e 2º (LC 139/2011, art. 7º) |
+| MEI | 2018 a 2026 | R$ 81.000,00 (R$ 6.750,00 por mês) | LC 123/2006, art. 18-A, §§ 1º e 2º (LC 155/2016, art. 11, III) |
+| MEI | 2027 | R$ 110.000,00 (R$ 9.166,67 por mês) | LC 238/2026, art. 2º e art. 10, II |
+| MEI | a partir de 2028 | R$ 140.000,00 (R$ 11.666,67 por mês) | LC 238/2026, arts. 1º e 10, I |
+| Microempresa | a partir de 2012 | R$ 360.000,00 | LC 123/2006, art. 3º, I |
+| Empresa de pequeno porte | 2012 a 2017 | R$ 3.600.000,00 | LC 123/2006, art. 3º, II (LC 139/2011) |
+| Empresa de pequeno porte | a partir de 2018 | R$ 4.800.000,00 | LC 123/2006, art. 3º, II (LC 155/2016) |
+
+Regra, como está na lei:
+
+- **Limite do ano.** O valor contratado num ano é comparado com o limite daquele ano-calendário. Não há tolerância: a lei não prevê margem em que o excesso deixe de ser excesso. A variável `L6_TOLERANCIA_TRANSICAO` foi retirada.
+- **Ano de início de atividade.** Limite proporcional aos meses, do mês do início até dezembro, contada a fração de mês como mês inteiro. MEI: valor mensal da lei vezes os meses (art. 18-A, § 2º). ME e EPP: limite anual vezes meses sobre 12 (art. 3º, § 2º).
+- **Faixa de 20%.** Só muda a data dos efeitos do excesso, e o alerta diz em qual faixa caiu. MEI: até 20%, desenquadramento a partir de 1º de janeiro do ano seguinte; acima, retroativo a 1º de janeiro do ano do excesso ou, no ano de início, ao início de atividade (art. 18-A, § 7º, III e IV). EPP: até 20%, exclusão no ano seguinte (art. 3º, §§ 9º-A e 12); acima, no mês seguinte ao do excesso (§ 9º) ou, no ano de início, retroativa ao início (§ 10). ME: passa a EPP no ano seguinte (art. 3º, § 7º).
+- **Antes de 2012.** Os limites não foram conferidos, e a L6 não avalia esses anos. O alerta da mesma empresa em outro ano lista os anos que ficaram de fora (`anos_nao_avaliados`).
+
+Outros anos do MEI entram por `L6_LIMITES_MEI` (JSON, como os limites da T5); cada linha vale do seu ano até a linha seguinte.
+
+**Coleta nova:**
+
+- `cnpj_arquivo` (versão 1.3.0) lê também a tabela **Simples** (arquivo com `SIMPLES` no nome; 7 campos). A opção e as datas ficam nos atributos da empresa (`opcao_mei`, `data_opcao_mei`, `data_exclusao_mei` e os três do Simples). `scripts/recortar_cnpj.py` recorta também o `Simples.zip`. A leitura do arquivo real não foi testada.
+- `portal_transparencia` (versão 1.2.0) aceita três recursos novos, conferidos na API real em 17/11/2026 (uma página de cada, só a estrutura):
+  - `{"recurso":"cepim","codigoSancionado":[CNPJ]}`: vira `sancao` com `cadastro: "CEPIM"`, sem período (`data_referencia`);
+  - `{"recurso":"convenios","codigoSancionado":[CNPJ do convenente]}`: vira a entidade `convenio`, ligada ao convenente por `convenente_de` e ao órgão por `concedente_de`. Sem filtro a API responde 400; o conector usa `convenente` e confere o CNPJ de cada item;
+  - `{"recurso":"ceaf","nomeSancionado":[nome]}`: **só por nome, nunca por CPF**. O CPF do CEAF já vem descaracterizado. Vira `sancao` com `cadastro: "CEAF"` ligada a uma `pessoa` de chave própria (`expulso:...`), nunca fundida. Só entra o registro de nome idêntico ao consultado.
+  - Com `"do_caso": true`: CEPIM e convênios consultam as entidades sem fins lucrativos (pela natureza jurídica) e as convenentes do caso; o CEAF consulta os **nomes** dos sócios pessoa física das contratadas e convenentes (até 100).
+- A T6 continua só com CEIS e CNEP.
+
+**Limitações:** a L6 compara valor contratado, não receita; o porte é o atual. Na L16, a entidade que só veio do Portal (sem natureza jurídica coletada no CNPJ) não é avaliada; o sinal com eleito ou PEP depende da L9. A contratada que tem ela mesma registro no CEPIM não gera alerta próprio (a T6 não cobre o CEPIM).
+
+### Alerta de combinação (`COMB`)
+
+Uma empresa ou pessoa com alertas de várias tipologias distintas recebe um alerta de combinação, que lista cada alerta, o peso e as evidências. A base é Velasco et al. (2021), seção 3.3: os padrões isolados pouco dizem, e "the risk of fraud increases when combinations of these risk patterns are identified". **Não é escore de culpa**: é pista para priorizar (RF12, RF14). Código em `buscador/tipologias/combinacao.py`; **pesos, mínimos e regras de contagem são decisão do autor**.
+
+- **Regra:** ao menos `COMB_MINIMO_TIPOLOGIAS` (2) tipologias distintas **e** soma de pesos de ao menos `COMB_PESO_MINIMO` (2,0), entre os alertas ativos e **não descartados** em que a entidade aparece.
+- **Pesos:** 1 por tipologia; 0,5 para os sinais fracos (L14 e L15); 0 para a L8, que é a composição de T1 e T7 e não soma de novo. `COMB_PESOS` (JSON) troca os pesos. Com os padrões, dois sinais fracos sozinhos não disparam.
+- **Mesmo fato conta uma vez:** L1 e T2 falam do mesmo endereço. Vários alertas da mesma tipologia também contam uma vez.
+- **Explicação:** `parametros.componentes` traz, de cada alerta, `alerta_id`, `tipologia`, `tipologia_nome`, `titulo`, `severidade`, `situacao`, `peso`, `sinal_fraco`, `conta` e `observacao` (por que não conta); e ainda `tipologias_distintas`, `soma_pesos`, os mínimos usados e o `aviso`. As evidências repetem até três de cada componente, com o código da tipologia.
+- **Execução:** a combinação roda por último (`POST .../alertas/executar` sem `tipologias`, ou com `"COMB"`), sobre todos os alertas ativos do caso. Severidade alta: abre a fila. Executar só outra tipologia, ou decidir um alerta, **não** recalcula a combinação; ela é refeita na execução seguinte.
+- **API:** catálogo e alertas ganham `peso` (o peso da tipologia na combinação).
+
+### Não implementado
+
+- **L2** (telefone ou e-mail compartilhado): o conector não guarda telefone, e a ficha recomenda só em combinação.
+- **L5, nível 2** (lista de jurisdições): depende da IN RFB 1.037/2010, não conferida.
+- **L7, parte (b)** (troca de sócios entre duas coletas): o monitoramento já avisa a mudança de quadro, mas não gera alerta de tipologia.
+- **L9, L11 (RF05), L12 e L13:** dependem de decisão do orientador.
