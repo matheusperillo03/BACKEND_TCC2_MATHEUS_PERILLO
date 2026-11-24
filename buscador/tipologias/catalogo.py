@@ -197,6 +197,18 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
         ["cnpj_arquivo", "pncp", "portal_transparencia (ceis, cnep, cepim, ceaf)"],
         ["qualificacoes_administracao"],
     ),
+    "L2": (
+        "H49",
+        "Sinal fraco, não gera alerta próprio: só pesa na combinação. O mesmo telefone (DDD e "
+        "número) ou o mesmo correio eletrônico no cadastro de K ou mais empresas do caso que "
+        "formam K ou mais grupos sem sócio em comum. O contato é comparado normalizado e "
+        "mostrado mascarado; o valor completo fica só na captura.",
+        "Carta Circular BCB nº 4.001/2020, III, k (mesmo endereço de e-mail por diferentes "
+        "pessoas jurídicas); " + _GAFI_EGMONT + ", item 4. Estender ao telefone do cadastro, o "
+        "agrupamento por sócio e o limiar: decisão do autor.",
+        ["cnpj_arquivo"],
+        ["l2_minimo_empresas"],
+    ),
     "L13": (
         "H52",
         "Despesas contratadas de campanha de um candidato com uma empresa que (a) iniciou a "
@@ -212,16 +224,17 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
     ),
     "L14": (
         "H49",
-        "Sinal fraco: contratada cujos sócios-administradores estão TODOS em faixa etária "
-        "atípica, com valor contratado acima de V. Só a faixa etária é usada.",
+        "Sinal fraco, não gera alerta próprio: só pesa na combinação. Contratada cujos "
+        "sócios-administradores estão TODOS em faixa etária atípica, com valor contratado acima "
+        "de V. Só a faixa etária é usada.",
         _GAFI_EGMONT + ", itens 3 e 10. Limiares: decisão do autor.",
         ["cnpj_arquivo", "pncp"],
         ["l14_valor_minimo", "l14_faixas_atipicas", "qualificacoes_administracao"],
     ),
     "L15": (
         "H49",
-        "Sinal fraco: contratada com N ou mais CNAEs (principal e secundárias) ou com contratos "
-        "em M ou mais categorias de objeto.",
+        "Sinal fraco, não gera alerta próprio: só pesa na combinação. Contratada com N ou mais "
+        "CNAEs (principal e secundárias) ou com contratos em M ou mais categorias de objeto.",
         "Velasco et al. (2021), seção 3.2; " + _GAFI_EGMONT + ", item 4. Limiares: decisão do "
         "autor.",
         ["cnpj_arquivo", "pncp"],
@@ -268,6 +281,8 @@ _DESCRICAO_PARAMETROS = {
     "endereço (com complemento).",
     "l1_janela_abertura_dias": "Intervalo, em dias, para medir a concentração das aberturas.",
     "l1_minimo_abertas_na_janela": "Aberturas no intervalo para marcar abertura concentrada.",
+    "l2_minimo_empresas": "Número mínimo de empresas, em grupos sem sócio em comum, com o mesmo "
+    "telefone ou correio eletrônico.",
     "l3_minimo_empresas": "Número mínimo de empresas administradas pela mesma pessoa provável.",
     "l3_minimo_abertas_na_janela": "Quantas dessas empresas precisam ter sido abertas no "
     "intervalo.",
@@ -297,8 +312,8 @@ _DESCRICAO_PARAMETROS = {
     "(3069 Fundação Privada, 3301 Organização Social, 3999 Associação Privada).",
     "comb_minimo_tipologias": "Número mínimo de tipologias distintas na mesma entidade.",
     "comb_peso_minimo": "Soma mínima dos pesos das tipologias contadas.",
-    "comb_pesos": "Peso de cada tipologia na combinação (sinais fracos pesam menos; composição "
-    "pesa zero).",
+    "comb_pesos": "Peso de cada tipologia na combinação (sinais fracos pesam menos e não têm "
+    "alerta próprio; composição pesa zero).",
     "qualificacoes_administracao": "Códigos de qualificação de sócio que contam como "
     "administração (tabela de domínio Qualificações do CNPJ).",
     "t10_expressoes_extras": "Expressões regulares além das do código "

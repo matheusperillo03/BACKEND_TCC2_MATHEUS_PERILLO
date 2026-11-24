@@ -113,6 +113,13 @@ SOCIO_PJ, SOCIO_PF, SOCIO_ESTRANGEIRO = "1", "2", "3"
 # Teto de níveis percorridos na L4 (proteção contra cadeias anômalas; ciclos são cortados antes).
 L4_MAX_NIVEIS = 20
 
+# L2 (sinal fraco): número mínimo de empresas sem sócio em comum com o mesmo telefone ou e-mail.
+# Decisão do autor: 3, o mesmo mínimo da T2 (endereço compartilhado); duas empresas com o mesmo
+# contato são comuns demais para pesar, mesmo como sinal fraco.
+L2_MINIMO_EMPRESAS = 3
+ROTULOS_CONTATO = {"telefone": "telefone", "email": "correio eletrônico"}
+TEXTO_SO_NA_COMBINACAO = "Sozinho, este sinal não indica nada: só pesa no alerta de combinação."
+
 # L9 (decisão do autor): o mandato é contado de 1º de janeiro do ano seguinte ao da eleição e dura
 # este número de anos. É uma aproximação: a data de posse varia com o cargo e o mandato de
 # senador é de oito anos; nenhum dos dois é tratado à parte.
@@ -133,6 +140,7 @@ AVISO_PISTA = "É indício cadastral a verificar, não conclusão (RF12)."
 def parametros_padrao() -> dict:
     """Padrões do código para as tipologias L (os mesmos padrões da configuração)."""
     return {
+        "l2_minimo_empresas": L2_MINIMO_EMPRESAS,
         "l1_minimo_estabelecimentos": 5,
         "l1_janela_abertura_dias": 180,
         "l1_minimo_abertas_na_janela": 3,
@@ -1385,6 +1393,138 @@ def tipologia_l10(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
     return _l10_sancionadas(ctx, parametros) + _l10_expulsos(ctx, parametros)
 
 
+# ---- L2 (sinal fraco): telefone ou e-mail compartilhado por empresas sem sócio em comum --------
+#
+# Carta Circular BCB nº 4.001/2020, art. 1º, III, k ("registro de mesmo endereço de e-mail [...]
+# por diferentes pessoas jurídicas ou organizações, sem justificativa razoável para tal
+# ocorrência"); GAFI/Egmont (2018), Anexo E, item 4. O inciso III, k, fala de e-mail; estender a
+# regra ao telefone do cadastro é DECISÃO DO AUTOR (ficha L2 em docs/lavagem/tipologias-lavagem.md).
+#
+# Dados: ``ddd_1``/``telefone_1``, ``ddd_2``/``telefone_2`` e ``correio_eletronico`` dos
+# Estabelecimentos (leiaute dos dados abertos do CNPJ). A resolução guarda só a chave de comparação
+# e a forma mascarada (``resolucao.normalizacao.contatos``): o valor completo fica na captura.
+#
+# Decisões do autor:
+# - "sem sócio em comum": as empresas que dividem o contato são agrupadas pelos sócios (duas
+#   empresas com um sócio em comum, direto ou por uma terceira do mesmo contato, formam um grupo);
+#   o sinal exige ``l2_minimo_empresas`` GRUPOS distintos. O contato igual dentro do mesmo quadro
+#   se explica pelo próprio quadro, que o grafo já mostra;
+# - não exige contrato nem situação ativa: o contato é do cadastro, e a combinação só dispara se a
+#   mesma empresa tiver outros alertas;
+# - um sinal por empresa e por contato, para que a primeira evidência seja o estabelecimento da
+#   própria empresa;
+# - o falso positivo é MUITO ALTO (o contador costuma registrar o próprio telefone e e-mail nas
+#   empresas que atende): por isso é sinal fraco, sem alerta próprio.
+
+
+def _grupos_por_socio(empresas: list[str], socios: dict[str, set[str]]) -> int:
+    """Número de grupos de empresas ligadas por sócio em comum (componentes conexos)."""
+    grupo = {e: e for e in empresas}
+
+    def raiz(e: str) -> str:
+        while grupo[e] != e:
+            grupo[e] = grupo[grupo[e]]
+            e = grupo[e]
+        return e
+
+    dono: dict[str, str] = {}
+    for empresa in empresas:
+        for socio in socios.get(empresa, ()):
+            if socio in dono:
+                grupo[raiz(empresa)] = raiz(dono[socio])
+            else:
+                dono[socio] = empresa
+    return len({raiz(e) for e in empresas})
+
+
+def tipologia_l2(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
+    minimo = int(parametros["l2_minimo_empresas"])
+    socios = {
+        empresa_id: {socio.id for socio, _ in pares} for empresa_id, pares in _quadro(ctx).items()
+    }
+    # chave do contato -> empresa -> (estabelecimento, contato): o primeiro estabelecimento de
+    # cada empresa que traz o contato.
+    por_contato: dict[str, dict[str, tuple[dict, dict]]] = {}
+    sem_dado = 0
+    for empresa in _empresas(ctx):
+        estabelecimentos = _estabelecimentos(empresa)
+        if estabelecimentos and all("contatos" not in est for est in estabelecimentos):
+            sem_dado += 1
+        for est in estabelecimentos:
+            for contato in est.get("contatos") or []:
+                chave = str(contato.get("chave") or "")
+                if chave:
+                    por_contato.setdefault(chave, {}).setdefault(empresa.id, (est, contato))
+    if sem_dado:
+        ctx.avisos.append(
+            f"L2: {sem_dado} empresa(s) do caso foram coletadas antes de o conector do CNPJ "
+            "guardar telefone e e-mail e ficaram fora da regra; para avaliá-las, é preciso "
+            "coletar de novo os dados do CNPJ."
+        )
+
+    detectados = []
+    for chave in sorted(por_contato):
+        do_contato = por_contato[chave]
+        if len(do_contato) < minimo:
+            continue
+        ordenadas = sorted(do_contato, key=lambda eid: ctx.entidades[eid].chave)
+        grupos = _grupos_por_socio(ordenadas, socios)
+        if grupos < minimo:
+            continue
+        contato = do_contato[ordenadas[0]][1]
+        tipo = str(contato.get("tipo") or "")
+        rotulo = ROTULOS_CONTATO.get(tipo, "contato")
+        mascarado = str(contato.get("mascarado") or "")
+        for empresa_id in ordenadas:
+            empresa = ctx.entidades[empresa_id]
+            outras = [eid for eid in ordenadas if eid != empresa_id]
+            motivo = (
+                f"Sinal fraco. O {rotulo} {mascarado} do cadastro de {empresa.rotulo} (CNPJ "
+                f"básico {empresa.identificador}) aparece também em {len(outras)} outra(s) "
+                "empresa(s) do caso: "
+                + _lista(
+                    [
+                        f"{ctx.entidades[eid].rotulo} ({ctx.entidades[eid].identificador})"
+                        for eid in outras
+                    ]
+                )
+                + f". Pelos sócios, as {len(ordenadas)} empresas formam {grupos} grupo(s) sem "
+                f"sócio em comum, com mínimo configurado de {minimo}. Pode indicar controle comum "
+                "que o quadro societário não mostra, mas o falso positivo é muito alto: o contador "
+                "costuma registrar o próprio telefone e e-mail nas empresas que atende. O contato "
+                "é mostrado mascarado, porque é dado pessoal quando a empresa é individual; o "
+                f"valor completo está na captura de origem. {TEXTO_SO_NA_COMBINACAO}"
+            )
+            evidencias = [
+                _evidencia_estabelecimento(
+                    ctx, ctx.entidades[eid], do_contato[eid][0], f"{rotulo} {mascarado}"
+                )
+                for eid in [empresa_id, *outras[: MAX_ITENS_NO_MOTIVO - 1]]
+            ]
+            detectados.append(
+                AlertaDetectado(
+                    tipologia="L2",
+                    titulo=(
+                        f"Mesmo {rotulo} em {len(ordenadas)} empresas sem sócio em comum: "
+                        f"{empresa.rotulo}"
+                    ),
+                    motivo=motivo,
+                    entidades=[empresa_id],
+                    evidencias=evidencias,
+                    parametros={
+                        "l2_minimo_empresas": minimo,
+                        "tipo_contato": tipo,
+                        "contato_mascarado": mascarado,
+                        "empresas": len(ordenadas),
+                        "grupos_sem_socio_comum": grupos,
+                        "sinal_fraco": True,
+                    },
+                    discriminador=chave,
+                )
+            )
+    return detectados
+
+
 # ---- L14 (sinal fraco): sócio em faixa etária atípica ------------------------------------------
 #
 # GAFI/Egmont (2018), Anexo E, item 3 ("transactions which appear strange given an individual's
@@ -2053,6 +2193,7 @@ def tipologia_l16(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 
 TIPOLOGIAS_LAVAGEM = {
     "L1": tipologia_l1,
+    "L2": tipologia_l2,
     "L3": tipologia_l3,
     "L4": tipologia_l4,
     "L5": tipologia_l5,

@@ -40,7 +40,8 @@ class Politica:
     # "contratacao" (T: possível infração antecedente em contratações), "lavagem" (L: possível
     # ocultação por interposição de pessoas e empresas) ou "combinacao".
     grupo: str = "contratacao"
-    # Sinal fraco: sozinho não indica nada; só pesa no alerta de combinação.
+    # Sinal fraco (H49): sozinho não indica nada. NÃO gera alerta próprio: é avaliado junto com
+    # a combinação e só aparece dentro dela, como componente de peso reduzido.
     sinal_fraco: bool = False
 
     def __post_init__(self) -> None:
@@ -329,6 +330,19 @@ POLITICAS: dict[str, Politica] = {
             "legítima. O cruzamento de pessoas é por seis dígitos do CPF e nome, sem fusão."
         ),
     ),
+    "L2": Politica(
+        nome="Telefone ou e-mail compartilhado por empresas sem sócio em comum",
+        severidade="baixa",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        grupo="lavagem",
+        sinal_fraco=True,
+        politica_erro=(
+            "Prefere evitar falso positivo: é sinal fraco, que não gera alerta próprio e só pesa "
+            "no alerta de combinação. Só conta o contato igual em empresas de grupos sem sócio "
+            "em comum. O falso positivo é muito alto: o contador costuma registrar o próprio "
+            "telefone e e-mail nas empresas que atende. O contato é mostrado mascarado."
+        ),
+    ),
     "L14": Politica(
         nome="Sócio em faixa etária atípica em empresa contratada",
         severidade="baixa",
@@ -336,8 +350,8 @@ POLITICAS: dict[str, Politica] = {
         grupo="lavagem",
         sinal_fraco=True,
         politica_erro=(
-            "Prefere evitar falso positivo: é sinal fraco, que sozinho não indica nada e só pesa "
-            "no alerta de combinação. Só dispara quando TODOS os sócios-administradores estão em "
+            "Prefere evitar falso positivo: é sinal fraco, que não gera alerta próprio e só pesa "
+            "no alerta de combinação. Só conta quando TODOS os sócios-administradores estão em "
             "faixa etária atípica e o valor contratado passa do mínimo. Falso positivo esperado: "
             "herança, sucessão e empresa familiar. Só a faixa etária é mostrada, nunca a idade."
         ),
@@ -349,7 +363,7 @@ POLITICAS: dict[str, Politica] = {
         grupo="lavagem",
         sinal_fraco=True,
         politica_erro=(
-            "Prefere evitar falso negativo: é sinal fraco, que sozinho não indica nada e só pesa "
+            "Prefere evitar falso negativo: é sinal fraco, que não gera alerta próprio e só pesa "
             "no alerta de combinação. O falso positivo é alto: muitas empresas registram "
             "atividades a mais por precaução."
         ),

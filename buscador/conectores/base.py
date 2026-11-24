@@ -150,6 +150,11 @@ class RegistroEstabelecimento:
     cep: str = ""
     uf: str = ""
     municipio: str = ""
+    # Contato (tipologia L2). O fax do leiaute não é guardado (decisão do autor).
+    ddd_1: str = ""
+    telefone_1: str = ""
+    ddd_2: str = ""
+    telefone_2: str = ""
     correio_eletronico: str = ""
     situacao_especial: str = ""
     data_situacao_especial: str = ""

@@ -75,6 +75,11 @@ class Cenario:
         capital: float = 100_000.0,
         cnae: str = "4120400",
         secundarias: str = "",
+        ddd: str = "",
+        telefone: str = "",
+        ddd2: str = "",
+        telefone2: str = "",
+        email: str = "",
     ) -> str:
         captura = self.captura("cnpj_arquivo")
         self.registros.append(
@@ -106,6 +111,11 @@ class Cenario:
                 cep="70000900",
                 uf="DF",
                 municipio="9701",
+                ddd_1=ddd,
+                telefone_1=telefone,
+                ddd_2=ddd2,
+                telefone_2=telefone2,
+                correio_eletronico=email,
             )
         )
         return basico
@@ -221,12 +231,29 @@ class Cenario:
             self.sessao, self.caso_id, {**self.padrao, **parametros}, list(codigos)
         )
 
+    def sinais(self, *codigos: str, **parametros):
+        """Avalia os sinais fracos pedidos (L2, L14, L15) sem gravar alerta: é o que a combinação
+        recebe. Devolve os ``AlertaDetectado``."""
+        from buscador.tipologias import motor
+
+        self.incorporar()
+        ctx = motor.carregar_contexto(self.sessao, self.caso_id)
+        completos = {
+            **motor.parametros_padrao_lavagem(),
+            **self.padrao,
+            **motor.parametros_efetivos({}, parametros),
+        }
+        return motor.avaliar_sinais_fracos(ctx, completos, list(codigos))
+
     def rotulos(self, alerta) -> set[str]:
         return {self.sessao.get(Entidade, eid).rotulo for eid in alerta.entidades}
 
 
 def verificar_explicacao(alerta, sessao) -> None:
-    """Todo alerta L: motivo em frase, pista e não conclusão, e evidência com captura e hash."""
+    """Todo alerta L: motivo em frase, pista e não conclusão, e evidência com captura e hash.
+    Serve também para o sinal fraco (``AlertaDetectado``), cujas evidências são objetos."""
+    from dataclasses import asdict, is_dataclass
+
     from buscador.modelos import Captura
     from buscador.tipologias.politicas import POLITICAS
 
@@ -234,6 +261,8 @@ def verificar_explicacao(alerta, sessao) -> None:
     assert alerta.severidade == politica.severidade
     assert len(alerta.motivo) > 80 and alerta.evidencias
     for evidencia in alerta.evidencias:
+        if is_dataclass(evidencia):
+            evidencia = asdict(evidencia)
         captura = sessao.get(Captura, evidencia["captura_id"])
         assert captura.sha256 == evidencia["sha256"]
         assert captura.url_ou_arquivo.startswith("simulado://")

@@ -249,7 +249,11 @@ def _estabelecimento(linha: list[str], captura_id: str) -> RegistroEstabelecimen
         cep=c[18],
         uf=c[19],
         municipio=c[20],
-        # c[21..26]: DDD/telefones/fax, não usados no MVP
+        # Telefones e e-mail: usados pela L2 (contato compartilhado). c[25..26] (fax): não lido.
+        ddd_1=c[21],
+        telefone_1=c[22],
+        ddd_2=c[23],
+        telefone_2=c[24],
         correio_eletronico=c[27],
         situacao_especial=c[28],
         data_situacao_especial=c[29],
@@ -322,7 +326,9 @@ class ConectorCnpjArquivo(Conector):
     # 1.2.0: aceita o CNPJ alfanumérico (letras de A a Z não são mais descartadas) na raiz e
     # na ordem.
     # 1.3.0: lê também a tabela Simples (opção pelo Simples e pelo MEI).
-    versao = "1.3.0"
+    # 1.4.0: lê os telefones (DDD e número 1 e 2) do estabelecimento, usados pela L2 com o
+    # correio eletrônico, que já era lido.
+    versao = "1.4.0"
 
     def __init__(
         self,

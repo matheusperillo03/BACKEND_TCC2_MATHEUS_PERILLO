@@ -1,5 +1,6 @@
 """Tipologias de lavagem e ocultação (L) sobre dados já coletados: L1, L3, L4, L5, L7, L8, L10
-(parte CEIS/CNEP) e os sinais fracos L14 e L15. Cada regra tem caso positivo, negativo e de limite.
+(parte CEIS/CNEP) e as regras dos sinais fracos L14 e L15 (a L2 está em
+``test_sinais_fracos.py``). Cada regra tem caso positivo, negativo e de limite.
 
 Só dados sintéticos (``tests/apoio_lavagem.py``) e CPF sempre descaracterizado. Os critérios e as
 fontes estão em ``buscador/tipologias/lavagem.py``.
@@ -16,7 +17,7 @@ from buscador.tipologias.politicas import POLITICAS
 from tests.apoio_lavagem import SIAPE, Cenario, verificar_explicacao
 from tests.conftest import cabecalhos, criar_config
 
-CODIGOS_CADASTRAIS = ["L1", "L3", "L4", "L5", "L7", "L8", "L10", "L14", "L15"]
+CODIGOS_CADASTRAIS = ["L1", "L2", "L3", "L4", "L5", "L7", "L8", "L10", "L14", "L15"]
 
 
 @pytest.fixture
@@ -545,6 +546,9 @@ def test_rf04_l10_limite_sancao_posterior_ao_contrato_nao_dispara(cenario):
 
 
 # ==== L14 (sinal fraco): faixa etária atípica ===================================================
+#
+# H49: os sinais fracos não geram alerta próprio. ``cenario.sinais`` avalia a regra como a
+# combinação a recebe; que nenhum alerta é gravado está em ``tests/test_sinais_fracos.py``.
 
 
 def _faixa(cenario: Cenario, faixas: list[str], valor: float = 150_000.0) -> None:
@@ -556,7 +560,7 @@ def _faixa(cenario: Cenario, faixas: list[str], valor: float = 150_000.0) -> Non
 
 def test_rf04_l14_dispara_quando_todos_os_administradores_estao_em_faixa_atipica(cenario):
     _faixa(cenario, ["9", "2"])
-    (alerta,) = cenario.alertas("L14")
+    (alerta,) = cenario.sinais("L14")
     verificar_explicacao(alerta, cenario.sessao)
     assert alerta.parametros["sinal_fraco"] is True and POLITICAS["L14"].sinal_fraco is True
     assert alerta.parametros["faixas_observadas"] == ["2", "9"]
@@ -567,13 +571,13 @@ def test_rf04_l14_dispara_quando_todos_os_administradores_estao_em_faixa_atipica
 
 def test_rf04_l14_nao_dispara_se_um_administrador_esta_em_faixa_comum(cenario):
     _faixa(cenario, ["9", "5"])
-    assert cenario.alertas("L14") == []
+    assert cenario.sinais("L14") == []
 
 
 def test_rf04_l14_limite_valor_igual_ao_minimo_nao_dispara(cenario):
     _faixa(cenario, ["9"], valor=100_000.0)
-    assert cenario.alertas("L14") == []
-    assert len(cenario.alertas("L14", l14_valor_minimo=99_999.99)) == 1
+    assert cenario.sinais("L14") == []
+    assert len(cenario.sinais("L14", l14_valor_minimo=99_999.99)) == 1
 
 
 # ==== L15 (sinal fraco): número excessivo de atividades =========================================
@@ -586,7 +590,7 @@ def _secundarias(quantidade: int) -> str:
 def test_rf04_l15_dispara_com_vinte_cnaes_em_contratada(cenario):
     cenario.empresa("92300001", "FAZ TUDO SINTETICA LTDA", secundarias=_secundarias(19))
     cenario.contrato("92300001", "2026-06-01")
-    (alerta,) = cenario.alertas("L15")
+    (alerta,) = cenario.sinais("L15")
     verificar_explicacao(alerta, cenario.sessao)
     assert alerta.parametros["cnaes"] == 20 and alerta.parametros["sinal_fraco"] is True
     assert "20 atividades econômicas" in alerta.motivo and POLITICAS["L15"].sinal_fraco is True
@@ -599,17 +603,17 @@ def test_rf04_l15_limite_dezenove_cnaes_nao_disparam_nem_empresa_sem_contrato(ce
     cenario.empresa(
         "92300003", "SEM CONTRATO SINTETICA LTDA", numero="3", secundarias=_secundarias(19)
     )
-    assert cenario.alertas("L15") == []
-    assert len(cenario.alertas("L15", l15_minimo_cnaes=19)) == 1
+    assert cenario.sinais("L15") == []
+    assert len(cenario.sinais("L15", l15_minimo_cnaes=19)) == 1
 
 
 def test_rf04_l15_dispara_por_contratos_em_muitas_categorias_de_objeto(cenario):
     cenario.empresa("92300004", "OBJETOS DIVERSOS SINTETICA LTDA")
     for categoria in (2, 6, 7):
         cenario.contrato("92300004", "2026-06-01", categoria=categoria)
-    assert cenario.alertas("L15") == []
+    assert cenario.sinais("L15") == []
     cenario.contrato("92300004", "2026-07-01", categoria=8)
-    (alerta,) = cenario.alertas("L15")
+    (alerta,) = cenario.sinais("L15")
     assert alerta.parametros["categorias_de_objeto"] == 4 and alerta.parametros["cnaes"] == 1
 
 
@@ -625,7 +629,7 @@ def test_rf04_tipologias_l_estao_na_tabela_unica_no_catalogo_e_na_api(cliente, c
         assert item["grupo"] == politica.grupo == "lavagem"
         assert item["sinal_fraco"] is politica.sinal_fraco
         assert item["regra"] and item["base"] and item["politica_erro"] == politica.politica_erro
-    assert {c for c in CODIGOS_CADASTRAIS if por_codigo[c]["sinal_fraco"]} == {"L14", "L15"}
+    assert {c for c in CODIGOS_CADASTRAIS if por_codigo[c]["sinal_fraco"]} == {"L2", "L14", "L15"}
     assert por_codigo["T1"]["grupo"] == "contratacao" and por_codigo["T1"]["sinal_fraco"] is False
     assert "FATF" in por_codigo["L1"]["base"] and "COAF" in por_codigo["L8"]["base"]
     # Pela API, com as fixtures do CNPJ: duas empresas com sócio estrangeiro (L5).
