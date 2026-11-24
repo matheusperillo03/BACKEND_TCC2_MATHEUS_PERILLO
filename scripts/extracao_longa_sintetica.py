@@ -254,7 +254,7 @@ def principal(argumentos: list[str] | None = None, provedor=None) -> int:
         except ErroConfiguracao as erro:
             print(f"Configuração recusada: {erro}", file=sys.stderr)
             return 2
-        with TestClient(app) as cliente:
+        with TestClient(app, base_url="http://localhost") as cliente:
             caso_id = cliente.post(
                 "/casos",
                 json={

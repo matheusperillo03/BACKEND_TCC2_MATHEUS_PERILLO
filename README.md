@@ -28,6 +28,7 @@ O projeto Compose chama-se `osint-tcc`. Sem as variáveis obrigatórias, o `dock
 - **Porta do PostgreSQL.** Não é publicada por padrão. Para acessar o banco do host, habilite de propósito: `docker compose -f docker-compose.yml -f docker-compose.postgres-porta.yml up -d` (publica em `127.0.0.1:55432`).
 - **Vindo de uma versão anterior.** Um banco criado antes do horizonte 1 do backlog (sem finalidade do caso, coletas, versão do conector e decisões de alerta) é atualizado no lugar: `python -m buscador.migrar` (o serviço `migracao` do Compose, que roda a cada `up`) cria as tabelas novas, acrescenta as colunas novas às tabelas existentes e refaz as concessões, sem apagar nada (ver "Modelo de dados"). Só a cadeia de auditoria versão 1 não é migrável (ver "Auditoria"): nesse caso, recrie os volumes com `docker compose down -v` (os dados do MVP são de demonstração).
 - **Documentação OpenAPI.** `/docs`, `/redoc` e `/openapi.json` não exigem token e por isso só existem com `MODO_DEV=1`.
+- **Acesso de fora da máquina.** Sem `URL_PUBLICA` a API só responde a requisições feitas pela própria máquina; às demais, `421`. Para atender outra máquina é preciso TLS e `MODO_DEV=0` (ver "Acesso de fora da máquina e TLS").
 
 ### Sem Docker (desenvolvimento, SQLite)
 
@@ -61,7 +62,8 @@ Todas estão em `.env.example`.
 | `CUSTODIA_CHAVE` (ou `CUSTODIA_CHAVE_ARQUIVO`) | **obrigatória, sem padrão** | Chave mestra da criptografia em repouso, 32 bytes em hexadecimal. Fica só no ambiente ou num arquivo, nunca no banco. As demais variáveis do horizonte 3 estão em "Horizonte 3 do backlog" |
 | `AUDITORIA_CHAVE_HMAC` | **obrigatória, sem padrão** | Chave do HMAC da cadeia de auditoria (mínimo de 32 caracteres). Fica só no ambiente, nunca no banco |
 | `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD` | **obrigatórias no Compose** | Senha do papel dono do banco e senha do papel da aplicação |
-| `MODO_DEV` | `0` | `1` aceita os tokens fixos de `TOKENS_DEV` (sem senha e sem MFA) e liga `/docs`, `/redoc` e `/openapi.json`. Só para a máquina do desenvolvedor |
+| `MODO_DEV` | `0` | `1` aceita os tokens fixos de `TOKENS_DEV` (sem senha e sem MFA) e liga `/docs`, `/redoc` e `/openapi.json`. Só para a máquina do desenvolvedor: com `URL_PUBLICA` de fora da máquina, o serviço não inicia |
+| `URL_PUBLICA` | vazio (só a própria máquina) | Endereço pelo qual os usuários chegam de fora: só esquema, nome e porta, por exemplo `https://nome.rede.ts.net`. Fora da máquina exige `https` e `MODO_DEV=0`, senão o serviço não inicia. A API responde `421` a requisição cujo `Host` não é local nem este |
 | `DATABASE_URL` | `sqlite:///./dados/buscador.db` | SQLAlchemy. No Compose a API recebe a URL do papel `osint_app` |
 | `DB_CRIAR_ESQUEMA` | `1` | `0` quando o esquema é criado antes pelo papel dono (`python -m buscador.migrar`), como no Compose |
 | `DADOS_DIR` | `./dados` | Capturas brutas cifradas (`<DADOS_DIR>/capturas/<aa>/<sha256>.gcm`) e âncora da auditoria (`<DADOS_DIR>/ancora/auditoria.json`) |
@@ -337,7 +339,29 @@ Ações novas na auditoria: `auth.senha_aceita`, `auth.login`, `auth.login_falho
 - **Para quem é obrigatório.** `MFA_PERFIS_OBRIGATORIOS` (padrão: os três perfis). O usuário cadastra o segundo fator no primeiro login; o administrador nunca vê o segredo. O segredo fica no banco cifrado com AES-256-GCM (chave fora do banco).
 - **Sessão.** Token opaco de 256 bits, guardado no banco só como SHA-256. Decisão: sessão no servidor em vez de JWT, porque logout, desativação da conta e troca de senha precisam valer na hora, e um JWT continua válido até expirar. Expira pela duração máxima (`SESSAO_DURACAO_MINUTOS`, 480) e por inatividade (`SESSAO_INATIVIDADE_MINUTOS`, 30).
 - **Força bruta.** `LOGIN_MAX_FALHAS` falhas seguidas (de senha ou de código) bloqueiam a conta por `LOGIN_BLOQUEIO_MINUTOS`. A resposta de falha é a mesma para login inexistente e senha errada, e o tempo de resposta também (um hash fictício é verificado quando o login não existe).
-- **Tokens de desenvolvimento.** `TOKENS_DEV` só vale com `MODO_DEV=1` (que também liga `/docs`). Com `MODO_DEV=0`, um `TOKENS_DEV` preenchido impede o serviço de iniciar. Quem usa token de desenvolvimento não passa por senha nem MFA: é só para a máquina do desenvolvedor e para os testes. **Atenção ao atualizar:** um `.env` de versão anterior, com `TOKENS_DEV` preenchido e `MODO_DEV=0`, precisa esvaziar `TOKENS_DEV` (e criar os usuários) ou declarar `MODO_DEV=1`; e precisa ganhar `CUSTODIA_CHAVE`.
+- **Tokens de desenvolvimento.** `TOKENS_DEV` só vale com `MODO_DEV=1` (que também liga `/docs`). Com `MODO_DEV=0`, um `TOKENS_DEV` preenchido impede o serviço de iniciar. Quem usa token de desenvolvimento não passa por senha nem MFA: é só para a máquina do desenvolvedor e para os testes. Com `MODO_DEV=1` e `URL_PUBLICA` de fora da máquina o serviço não inicia, e sem `URL_PUBLICA` a API não responde a requisições que chegam por outro nome (ver "Acesso de fora da máquina e TLS"). **Atenção ao atualizar:** um `.env` de versão anterior, com `TOKENS_DEV` preenchido e `MODO_DEV=0`, precisa esvaziar `TOKENS_DEV` (e criar os usuários) ou declarar `MODO_DEV=1`; e precisa ganhar `CUSTODIA_CHAVE`.
+
+### Acesso de fora da máquina e TLS (RNF01, 23/11/2026)
+
+Regra: **na própria máquina o sistema atende em http; fora dela, só por https, com `MODO_DEV=0` e com o endereço declarado.** Quatro travas, todas com teste em `tests/test_acesso_externo.py`:
+
+1. **`URL_PUBLICA` com `http` fora da máquina:** o serviço não inicia (`ErroConfiguracao`). "Própria máquina" é `localhost` ou um IP de loopback.
+2. **`MODO_DEV=1` com `URL_PUBLICA` de fora da máquina:** o serviço não inicia. Os tokens fixos dispensam senha e MFA e não podem ficar alcançáveis de fora.
+3. **`Host` da requisição:** a API responde `421` quando o `Host` não é local nem o nome de `URL_PUBLICA` (`HostPermitido`, em `buscador/api/app.py`). O nginx do front-end repassa o `Host` que recebeu. Consequência: um ambiente de desenvolvimento (`MODO_DEV=1`, sem `URL_PUBLICA`) publicado por engano num proxy ou numa VPN não responde por esse endereço, nem em `/health`.
+4. **Token de desenvolvimento com `MODO_DEV=0`:** `401` em qualquer rota; o mapa de tokens fica vazio.
+
+Duas formas de ter TLS (o código não escolhe; a regra acima vale para as duas):
+
+- **Proxy com TLS na frente do nginx (a forma do guia de implantação do piloto).** O Tailscale Serve termina o HTTPS, com certificado emitido para o nome da máquina na rede privada, e repassa para `http://127.0.0.1:8090`. Nada muda no Compose; no `.env` do ambiente, `URL_PUBLICA=https://<nome>.<rede>.ts.net`. O trecho entre o proxy e o nginx é local (loopback da mesma máquina), sem TLS.
+- **TLS no próprio nginx.** `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`, com `URL_PUBLICA` e `TLS_DIR_CERTIFICADO` (pasta do host com `servidor.crt` e `servidor.key`, montada só para leitura; `tls/` está no `.gitignore` e no `.dockerignore`). O nginx atende HTTPS na 443 (TLS 1.2 e 1.3), envia `Strict-Transport-Security` e redireciona para https o pedido http que não vem de localhost. As portas 443 e 80 são publicadas em `TLS_ENDERECO` (padrão `127.0.0.1`). A configuração está no repositório do front-end (`nginx-tls.conf`).
+
+Limites, para não prometer mais do que há:
+
+- O trecho nginx → API é http, na rede interna do Compose (mesma máquina). Não há TLS entre contêineres nem entre a API e o PostgreSQL.
+- A trava 3 confia no cabeçalho `Host`, que o cliente escolhe. Ela barra a exposição por descuido; não barra quem já alcança a porta e forja `Host: localhost`. Contra isso valem as portas publicadas só em `127.0.0.1` e a política de acesso da rede privada.
+- Não há cookie: o token da sessão vai no cabeçalho `Authorization` e fica no `sessionStorage` do navegador. Por isso não há atributo `Secure` a configurar; a proteção em trânsito é o próprio TLS, mais o HSTS.
+- **Ao atualizar um ambiente já acessado por VPN** (o do piloto), acrescente `URL_PUBLICA=https://<nome>.<rede>.ts.net` ao arquivo de ambiente antes de subir. Sem isso a API passa a responder `421` pelo endereço da VPN.
+- Não testado com o Tailscale real nesta entrega: se o Serve repassa o `Host` original ao nginx (é o que a trava 3 supõe). Se ele reescrever o `Host` para `127.0.0.1`, o acesso continua funcionando, mas a trava 3 deixa de distinguir o acesso de fora.
 
 ### H23: acesso por caso
 
@@ -862,7 +886,7 @@ As três tabelas novas são tabelas comuns: o papel da aplicação recebe `SELEC
 Conforme `docs/mvp-escopo.md`:
 
 - **Fontes:** dados abertos do CNPJ e do TSE (arquivos locais no layout oficial, sem baixar os conjuntos), PNCP (contratos e termos), Portal da Transparência (CEIS, CNEP e servidores, com chave do operador) e editais em texto ou PDF com camada de texto. O que ficou pendente nessas fontes está em "Pendências do horizonte 2" e em "Fontes reais e piloto com dados públicos". As demais fontes do RF01 (DODF/DOU, TCDF/TCU, TSE, tribunais, juntas, cartórios, redes sociais, WHOIS, notícias) são trabalho futuro.
-- **Segurança (RNF01):** usuários reais com senha, MFA por TOTP e sessão; acesso por caso; capturas cifradas no disco (horizonte 3). A trilha de auditoria (`GET /auditoria` e as entradas no relatório) é restrita a `delegado`/`admin` e não é filtrada por caso. `GET /auditoria/verificar` é aberto a todos os perfis e devolve só o resumo da integridade. Sem TLS (as portas ficam em `127.0.0.1`), sem cofre de chaves, sem recifragem na troca de chave, banco não cifrado pela aplicação, sem nuvem soberana (ver "Pendências do horizonte 3").
+- **Segurança (RNF01):** usuários reais com senha, MFA por TOTP e sessão; acesso por caso; capturas cifradas no disco (horizonte 3). A trilha de auditoria (`GET /auditoria` e as entradas no relatório) é restrita a `delegado`/`admin` e não é filtrada por caso. `GET /auditoria/verificar` é aberto a todos os perfis e devolve só o resumo da integridade. Fora da máquina o acesso é só por https, com `URL_PUBLICA` declarada (ver "Acesso de fora da máquina e TLS"); o trecho nginx → API e a conexão com o banco ficam em http na rede interna do Compose. Sem cofre de chaves, sem recifragem na troca de chave, banco não cifrado pela aplicação, sem nuvem soberana (ver "Pendências do horizonte 3").
 - **Volume:** a coleta e a resolução rodam dentro da requisição. Os limites de bytes, registros, páginas e período existem para manter isso viável; o dump completo do CNPJ não cabe neles e precisa ser recortado antes.
 - **Gestão de casos (RF08):** criar, listar e ver, com membros, anotações e tarefas (horizonte 3); sem notificações e sem anexos.
 - **Relatórios (RF09):** JSON e Markdown; sem modelo padronizado de Relatório de Inteligência. A exportação do grafo (RNF09) é em formatos abertos (GraphML e CSV); a importação no i2 e no Maltego não foi testada.
