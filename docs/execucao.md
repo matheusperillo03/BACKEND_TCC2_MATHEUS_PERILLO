@@ -2,7 +2,7 @@
 
 [Voltar ao README](../README.md)
 
-O serviço **falha fechado**: não há tokens, senhas nem chaves padrão. Antes de subir, copie `.env.example` para `.env` e preencha os campos obrigatórios (`AUDITORIA_CHAVE_HMAC`, `CUSTODIA_CHAVE` e, no Docker, `POSTGRES_PASSWORD` e `POSTGRES_APP_PASSWORD`). Gere os valores com `openssl rand -hex 32` (as duas chaves, diferentes entre si) e `openssl rand -hex 24` (senhas).
+O serviço **falha fechado**: não há tokens, senhas nem chaves padrão. Antes de subir, copie `.env.example` para `.env` e preencha os campos obrigatórios (`AUDITORIA_CHAVE_HMAC`, `CUSTODIA_CHAVE`, `CHAVE_IDENTIFICADORES` quando a fonte do TSE está ligada, como no Docker, e, no Docker, `POSTGRES_PASSWORD` e `POSTGRES_APP_PASSWORD`). Gere os valores com `openssl rand -hex 32` (as três chaves, diferentes entre si) e `openssl rand -hex 24` (senhas).
 
 O acesso é por **usuário real** (senha, MFA por TOTP e sessão). Crie o primeiro com `python -m buscador.usuarios criar <usuario> admin` (ver "H23: usuários, MFA e sessão", em [seguranca.md](seguranca.md)). Os tokens fixos de `TOKENS_DEV` só valem com `MODO_DEV=1`, na máquina do desenvolvedor.
 
@@ -29,7 +29,7 @@ O projeto Compose chama-se `osint-tcc`. Sem as variáveis obrigatórias, o `dock
 Requer [uv](https://docs.astral.sh/uv/) e Python 3.12 (o `uv` baixa o interpretador se faltar).
 
 ```bash
-cp .env.example .env                           # preencha AUDITORIA_CHAVE_HMAC e CUSTODIA_CHAVE
+cp .env.example .env                           # preencha AUDITORIA_CHAVE_HMAC e CUSTODIA_CHAVE (e CHAVE_IDENTIFICADORES, com TSE_DIR_BASE)
 uv sync
 uv run python -m buscador.usuarios criar ana.silva admin   # primeiro usuário (ou MODO_DEV=1 + TOKENS_DEV)
 uv run uvicorn buscador.main:app --port 8100 --reload

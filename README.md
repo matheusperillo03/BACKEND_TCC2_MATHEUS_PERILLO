@@ -16,11 +16,11 @@ O serviço **falha fechado**: não há tokens, senhas nem chaves padrão. Antes 
 
 ```bash
 cp .env.example .env
-openssl rand -hex 32    # gere dois valores diferentes: AUDITORIA_CHAVE_HMAC e CUSTODIA_CHAVE
+openssl rand -hex 32    # gere três valores diferentes: AUDITORIA_CHAVE_HMAC, CUSTODIA_CHAVE e CHAVE_IDENTIFICADORES
 openssl rand -hex 24    # gere dois valores: POSTGRES_PASSWORD e POSTGRES_APP_PASSWORD (só no Docker)
 ```
 
-Preencha no `.env` os campos obrigatórios: `AUDITORIA_CHAVE_HMAC` e `CUSTODIA_CHAVE` e, no Docker, `POSTGRES_PASSWORD` e `POSTGRES_APP_PASSWORD`. O `.env` não vai para o git. As demais variáveis estão em [docs/configuracao.md](docs/configuracao.md).
+Preencha no `.env` os campos obrigatórios: `AUDITORIA_CHAVE_HMAC`, `CUSTODIA_CHAVE`, `CHAVE_IDENTIFICADORES` (exigida quando a fonte do TSE está ligada, como no Docker) e, no Docker, `POSTGRES_PASSWORD` e `POSTGRES_APP_PASSWORD`. O `.env` não vai para o git. As demais variáveis estão em [docs/configuracao.md](docs/configuracao.md).
 
 ## Como rodar
 

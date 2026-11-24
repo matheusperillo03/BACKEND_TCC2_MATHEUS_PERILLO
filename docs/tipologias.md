@@ -117,6 +117,18 @@ Outros anos do MEI entram por `L6_LIMITES_MEI` (JSON, como os limites da T5); ca
 
 **Limitações:** a L6 compara valor contratado, não receita; o porte é o atual. Na L16, a entidade que só veio do Portal (sem natureza jurídica coletada no CNPJ) não é avaliada; o sinal com eleito ou PEP depende da L9. A contratada que tem ela mesma registro no CEPIM não gera alerta próprio (a T6 não cobre o CEPIM).
 
+### Tipologias sobre a ligação de pessoas (L9 e L13)
+
+Dependem da coleta do TSE (`tse_arquivo` 1.2.0) e da decisão do autor de 23/11/2026 sobre a ligação de pessoas (ver [conectores.md](conectores.md)).
+
+| Tipologia | Regra | Base | Severidade e erro que prefere evitar |
+|---|---|---|---|
+| **L9** Eleito possivelmente sócio de empresa contratada pelo próprio ente no mandato | Candidato eleito (`T9_SITUACOES_ELEITO`) ligado a um sócio por sugestão de resolução **não descartada** (mesmos seis dígitos visíveis do CPF e mesmo nome normalizado; pendente ou confirmada, sem fusão), cuja empresa assinou contrato, durante o mandato, com órgão do mesmo ente. O mandato é contado de 1º de janeiro do ano seguinte ao da eleição, por `L9_ANOS_MANDATO` (4) anos. Não avalia PEP nem eleito sem CPF divulgado | FATF (2011), § 44; Velasco et al. (2021), seção 3.3. Ligação por sugestão, duração e início do mandato e critério territorial: decisão do autor | alta; falso positivo |
+| **L13** Despesa de campanha com fornecedor de perfil incompatível | Despesas contratadas de campanha de um candidato com empresa que (a) iniciou a atividade menos de `L13_DIAS_ABERTURA` (180) dias antes da despesa ou (b) tem CNAE fora de `L13_CNAES_CAMPANHA`. Um alerta por candidato e fornecedor, com as despesas somadas. Não avalia fornecedor pessoa física nem os sinais de fachada do fornecedor (L1 e L6) | Carta Circular BCB 4.001/2020, XIV, d. Limiar de dias e lista de atividades: decisão do autor | média; falso negativo |
+
+- **`L13_CNAES_CAMPANHA` vazia (padrão, decisão do autor):** o critério (b) fica desligado e só a abertura recente é avaliada. A lista aceita códigos de 7 dígitos ou prefixos de 2 a 6, separados por vírgula.
+- **L9, limites:** o período do mandato é aproximado (não considera a data de posse nem o mandato de oito anos de senador), e órgão sem UF ou esfera fica de fora. Descartar a sugestão tira o par da regra.
+
 ### Alerta de combinação (`COMB`)
 
 Uma empresa ou pessoa com alertas de várias tipologias distintas recebe um alerta de combinação, que lista cada alerta, o peso e as evidências. A base é Velasco et al. (2021), seção 3.3: os padrões isolados pouco dizem, e "the risk of fraud increases when combinations of these risk patterns are identified". **Não é escore de culpa**: é pista para priorizar (RF12, RF14). Código em `buscador/tipologias/combinacao.py`; **pesos, mínimos e regras de contagem são decisão do autor**.
@@ -133,4 +145,6 @@ Uma empresa ou pessoa com alertas de várias tipologias distintas recebe um aler
 
 - **L5, nível 2** (lista de jurisdições): depende da IN RFB 1.037/2010, não conferida.
 - **L7, parte (b)** (troca de sócios entre duas coletas): o monitoramento já avisa a mudança de quadro, mas não gera alerta de tipologia.
-- **L9, L11 (RF05), L12 e L13:** dependem de decisão do orientador.
+- **L11 (RF05):** há a linha do tempo dos bens declarados ao TSE (`GET /casos/{id}/entidades/{eid}/patrimonio`), mas não o alerta: o sistema não coleta renda pública.
+- **L12:** exigiria cruzar o CPF completo entre TSE e Portal da Transparência.
+- **L9, parte de PEP:** não há coleta da rota de PEP do Portal da Transparência.
