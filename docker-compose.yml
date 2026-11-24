@@ -38,6 +38,9 @@ services:
       #   docker compose exec api python -m buscador.usuarios criar <usuario> admin
       MODO_DEV: ${MODO_DEV:-0}
       TOKENS_DEV: ${TOKENS_DEV:-}
+      # Endereco https pelo qual o sistema e acessado de fora da maquina (VPN ou proxy com TLS).
+      # Vazio: a API so atende em localhost. Fora da maquina exige https e MODO_DEV=0.
+      URL_PUBLICA: ${URL_PUBLICA:-}
       MFA_PERFIS_OBRIGATORIOS: ${MFA_PERFIS_OBRIGATORIOS:-analista,delegado,admin}
       SESSAO_DURACAO_MINUTOS: ${SESSAO_DURACAO_MINUTOS:-480}
       SESSAO_INATIVIDADE_MINUTOS: ${SESSAO_INATIVIDADE_MINUTOS:-30}

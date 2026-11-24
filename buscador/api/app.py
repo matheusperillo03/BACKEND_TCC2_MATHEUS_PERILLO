@@ -25,7 +25,7 @@ from buscador.api import (
     rotas_monitoramento,
 )
 from buscador.api.deps import usuario_atual
-from buscador.config import Configuracao, Usuario
+from buscador.config import Configuracao, Usuario, host_do_cabecalho, host_e_local
 from buscador.custodia import Custodia
 from buscador.db import criar_engine, criar_esquema, criar_fabrica_sessoes, verificar_esquema
 from buscador.ia.provedor import Provedor, criar_provedor
@@ -80,6 +80,36 @@ class LimiteDeCorpo:
             return evento
 
         await self.app(scope, receber, send)
+
+
+class HostPermitido:
+    """Recusa com 421 a requisição cujo ``Host`` não é a própria máquina nem o ``URL_PUBLICA``.
+
+    Sem ``URL_PUBLICA`` o serviço só atende em localhost. Assim, um ambiente publicado por proxy
+    ou VPN sem a declaração (que exige https e ``MODO_DEV=0``) não responde por esse endereço: os
+    tokens de desenvolvimento não ficam alcançáveis de fora por descuido. O ``Host`` é o que o
+    nginx do front-end repassa (``proxy_set_header Host $host``). A resposta não ecoa o valor.
+    """
+
+    def __init__(self, app: ASGIApp, config: Configuracao) -> None:
+        self.app = app
+        self.host_publico = config.host_publico()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            host = dict(scope["headers"]).get(b"host", b"").decode("latin-1")
+            nome = host_do_cabecalho(host)
+            if nome is None or not (host_e_local(nome) or nome == self.host_publico):
+                resposta = JSONResponse(
+                    {
+                        "detail": "Endereço não autorizado: este serviço só atende na própria "
+                        "máquina ou no endereço declarado em URL_PUBLICA (https)."
+                    },
+                    status_code=421,
+                )
+                await resposta(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def _texto_seguro(valor: object) -> str:
@@ -190,6 +220,9 @@ def criar_app(
         allow_headers=["Authorization", "X-Justificativa", "Content-Type"],
         expose_headers=["Content-Disposition", "X-Conteudo-SHA256"],
     )
+
+    # Adicionado por último: é a camada de fora e roda antes de qualquer outra.
+    app.add_middleware(HostPermitido, config=config)
 
     app.add_exception_handler(RequestValidationError, _erro_de_validacao)
 

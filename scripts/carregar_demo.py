@@ -147,7 +147,7 @@ def main() -> int:
         "Authorization": f"Bearer {token}",
         "X-Justificativa": quote("Carga de demonstração com dados sintéticos"),
     }
-    with TestClient(app) as cliente:
+    with TestClient(app, base_url="http://localhost") as cliente:
         r = cliente.post(
             "/casos",
             json={

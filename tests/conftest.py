@@ -38,6 +38,16 @@ def raiz_cnpj(tmp_path: Path) -> Path:
     return raiz
 
 
+@pytest.fixture(autouse=True)
+def _cliente_de_teste_e_local(monkeypatch):
+    """O ``TestClient`` chama a API com ``Host: testserver``. A API só atende na própria máquina
+    ou no ``URL_PUBLICA``; nos testes, esse nome conta como local. O comportamento real da
+    recusa é verificado em ``tests/test_acesso_externo.py``, com nomes explícitos."""
+    from buscador import config as modulo
+
+    monkeypatch.setattr(modulo, "HOSTS_LOCAIS", modulo.HOSTS_LOCAIS | {"testserver"})
+
+
 def criar_config(tmp_path: Path, raiz_cnpj: Path | None = None, **extras) -> Configuracao:
     valores = {
         "database_url": f"sqlite:///{tmp_path / 'teste.db'}",

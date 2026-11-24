@@ -30,6 +30,38 @@ class ErroConfiguracao(ValueError):
     """Configuração insegura ou incompleta: o serviço não deve iniciar."""
 
 
+# Nomes que designam a própria máquina. Qualquer endereço IP de loopback também conta.
+HOSTS_LOCAIS = frozenset({"localhost"})
+
+
+def host_e_local(host: str) -> bool:
+    """Diz se o nome (sem porta) é o da própria máquina: ``localhost`` ou IP de loopback."""
+    nome = host.strip().lower().rstrip(".")
+    if nome in HOSTS_LOCAIS:
+        return True
+    try:
+        return ipaddress.ip_address(nome.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def host_do_cabecalho(valor: str) -> str | None:
+    """Nome de máquina de um cabeçalho ``Host`` (sem a porta), ou ``None`` se for inválido."""
+    texto = valor.strip().lower()
+    if not texto or any(c.isspace() or c in ",/@?#\\" for c in texto):
+        return None
+    if texto.startswith("["):  # IPv6 literal: [::1] ou [::1]:8100
+        nome, fecha, resto = texto[1:].partition("]")
+        if not fecha or (resto and not resto.startswith(":")):
+            return None
+        separador, porta = resto[:1], resto[1:]
+    else:
+        nome, separador, porta = texto.partition(":")
+    if separador and not (porta.isdigit() and int(porta) <= 65535):
+        return None
+    return nome.rstrip(".") or None
+
+
 @dataclass(frozen=True)
 class Usuario:
     usuario: str
@@ -64,6 +96,10 @@ class Configuracao(BaseSettings):
     # Tokens fixos de desenvolvimento: só são aceitos com MODO_DEV=1.
     tokens_dev: str = ""
     modo_dev: bool = False
+    # Endereço pelo qual os usuários chegam ao sistema quando ele é acessado de fora da máquina
+    # (por exemplo, ``https://<nome>.<rede>.ts.net``). Vazio: só a própria máquina. Fora dela,
+    # exige ``https`` e ``MODO_DEV=0``; a API recusa requisição cujo ``Host`` não é local nem este.
+    url_publica: str = ""
 
     # ---- Criptografia em repouso (RNF01, H23) -------------------------------------------------
     # Chave mestra de 32 bytes em hexadecimal, fora do banco: na variável ou num arquivo (um dos
@@ -314,6 +350,48 @@ class Configuracao(BaseSettings):
         # CNPJ_DIR_BASE= (vazia) desativa a fonte; não pode virar o diretório corrente.
         return None if isinstance(valor, str) and not valor.strip() else valor
 
+    def host_publico(self) -> str | None:
+        """Nome de máquina de ``URL_PUBLICA`` quando o sistema é acessado de fora; ``None`` quando
+        o acesso é só local. Falha fechada: fora da máquina, só com TLS e sem modo de
+        desenvolvimento."""
+        url = self.url_publica.strip()
+        if not url:
+            return None
+        try:
+            partes = urlsplit(url)
+            host = (partes.hostname or "").lower().rstrip(".")
+            porta_valida = partes.port is None or partes.port > 0
+        except ValueError:  # porta não numérica ou colchete sem par
+            partes, host, porta_valida = None, "", False
+        if (
+            partes is None
+            or not porta_valida
+            or partes.scheme not in ("http", "https")
+            or not host
+            or partes.username
+            or partes.password
+            or partes.path not in ("", "/")
+            or partes.query
+            or partes.fragment
+        ):
+            raise ErroConfiguracao(
+                "URL_PUBLICA deve ser só esquema, nome da máquina e, se houver, porta "
+                "(por exemplo, https://nome.rede.ts.net), sem usuário, caminho nem parâmetros."
+            )
+        if host_e_local(host):
+            return None
+        if partes.scheme != "https":
+            raise ErroConfiguracao(
+                "URL_PUBLICA fora da própria máquina exige https: o sistema não é servido sem "
+                "TLS fora de localhost."
+            )
+        if self.modo_dev:
+            raise ErroConfiguracao(
+                "MODO_DEV=1 só vale na própria máquina: com URL_PUBLICA apontando para fora, os "
+                "tokens fixos dispensariam senha e MFA. Use MODO_DEV=0 e usuários reais."
+            )
+        return host
+
     def tokens(self) -> dict[str, Usuario]:
         """Mapa token -> usuário a partir de TOKENS_DEV (token:usuario:perfil, por vírgula).
 
@@ -560,6 +638,7 @@ class Configuracao(BaseSettings):
     def validar(self) -> None:
         """Chamada na inicialização: levanta ``ErroConfiguracao`` se algo obrigatório faltar."""
         self.tokens()
+        self.host_publico()
         self.chave_auditoria()
         self.cofre()
         if self.ligacao_de_pessoas_em_uso() or self.chave_identificadores.strip():

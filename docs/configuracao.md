@@ -10,7 +10,9 @@ Todas estão em `.env.example`.
 | `CUSTODIA_CHAVE` (ou `CUSTODIA_CHAVE_ARQUIVO`) | **obrigatória, sem padrão** | Chave mestra da criptografia em repouso, 32 bytes em hexadecimal. Fica só no ambiente ou num arquivo, nunca no banco. As demais variáveis do horizonte 3 estão em "Variáveis do horizonte 3", abaixo |
 | `AUDITORIA_CHAVE_HMAC` | **obrigatória, sem padrão** | Chave do HMAC da cadeia de auditoria (mínimo de 32 caracteres). Fica só no ambiente, nunca no banco |
 | `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD` | **obrigatórias no Compose** | Senha do papel dono do banco e senha do papel da aplicação |
-| `MODO_DEV` | `0` | `1` aceita os tokens fixos de `TOKENS_DEV` (sem senha e sem MFA) e liga `/docs`, `/redoc` e `/openapi.json`. Só para a máquina do desenvolvedor |
+| `MODO_DEV` | `0` | `1` aceita os tokens fixos de `TOKENS_DEV` (sem senha e sem MFA) e liga `/docs`, `/redoc` e `/openapi.json`. Só para a máquina do desenvolvedor: com `URL_PUBLICA` de fora da máquina, o serviço não inicia |
+| `URL_PUBLICA` | vazio (só a própria máquina) | Endereço pelo qual os usuários chegam de fora: só esquema, nome e porta, por exemplo `https://nome.rede.ts.net`. Fora da máquina exige `https` e `MODO_DEV=0`, senão o serviço não inicia. A API responde `421` a requisição cujo `Host` não é local nem este |
+| `TLS_DIR_CERTIFICADO`, `TLS_ENDERECO` | sem padrão, `127.0.0.1` | Só com `docker-compose.tls.yml`: pasta do host com `servidor.crt` e `servidor.key` (montada só para leitura) e endereço em que as portas 443 e 80 são publicadas (ver "Acesso de fora da máquina e TLS", em [seguranca.md](seguranca.md)) |
 | `DATABASE_URL` | `sqlite:///./dados/buscador.db` | SQLAlchemy. No Compose a API recebe a URL do papel `osint_app` |
 | `DB_CRIAR_ESQUEMA` | `1` | `0` quando o esquema é criado antes pelo papel dono (`python -m buscador.migrar`), como no Compose |
 | `DADOS_DIR` | `./dados` | Capturas brutas cifradas (`<DADOS_DIR>/capturas/<aa>/<sha256>.gcm`) e âncora da auditoria (`<DADOS_DIR>/ancora/auditoria.json`) |
