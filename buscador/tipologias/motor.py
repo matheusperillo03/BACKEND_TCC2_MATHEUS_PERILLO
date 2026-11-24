@@ -50,6 +50,7 @@ NOMES_PARAMETROS = (
     "l1_minimo_estabelecimentos",
     "l1_janela_abertura_dias",
     "l1_minimo_abertas_na_janela",
+    "l2_minimo_empresas",
     "l3_minimo_empresas",
     "l3_minimo_abertas_na_janela",
     "l3_janela_meses",
@@ -600,6 +601,30 @@ def ordem_tipologias() -> list[str]:
     return [*sorted(TIPOLOGIAS, key=chave_do_codigo), CODIGO_COMBINACAO]
 
 
+def sinais_fracos() -> list[str]:
+    """Códigos dos sinais fracos (H49): L2, L14 e L15. Não geram alerta próprio; são avaliados
+    junto com a combinação e só pesam nela."""
+    return [
+        codigo
+        for codigo in sorted(TIPOLOGIAS, key=chave_do_codigo)
+        if (politica := politicas.politica(codigo)) is not None and politica.sinal_fraco
+    ]
+
+
+def avaliar_sinais_fracos(
+    ctx: Contexto, parametros: dict, codigos: list[str] | None = None
+) -> list[AlertaDetectado]:
+    """Avalia os sinais fracos (todos, ou só ``codigos``) sobre o contexto, sem gravar nada. O
+    resultado tem o mesmo formato de um alerta detectado (motivo, números e evidências ligadas
+    às capturas), mas só existe dentro do alerta de combinação."""
+    todos = sinais_fracos()
+    detectados: dict[str, AlertaDetectado] = {}
+    for codigo in todos if codigos is None else [c for c in codigos if c in todos]:
+        for d in TIPOLOGIAS[codigo](ctx, parametros):
+            detectados.setdefault(d.chave, d)
+    return list(detectados.values())
+
+
 # ---- Execução ---------------------------------------------------------------------------------
 
 
@@ -613,6 +638,7 @@ _LIMITES_PARAMETROS = {
     "l1_minimo_estabelecimentos": (2, 10_000),
     "l1_janela_abertura_dias": (1, 36_500),
     "l1_minimo_abertas_na_janela": (2, 10_000),
+    "l2_minimo_empresas": (2, 10_000),
     "l3_minimo_empresas": (2, 10_000),
     "l3_minimo_abertas_na_janela": (1, 10_000),
     "l3_janela_meses": (1, 1_200),
@@ -728,6 +754,12 @@ def executar(
     detectado é apagado se nunca recebeu decisão e fica inativo (``ativo = False``) se recebeu.
     Alertas de tipologias não pedidas não são tocados.
 
+    Sinais fracos (H49: L2, L14 e L15) NÃO geram alerta próprio. São avaliados sempre que a
+    combinação roda, e só então, e entram nela como componentes sem alerta (``alerta_id`` nulo),
+    com o motivo e as evidências. Pedir só um sinal fraco, sem a combinação, não devolve nada.
+    Alertas L14 e L15 gravados por versões anteriores saem na reconciliação: o pendente sem
+    decisão é apagado e o que tinha decisão fica inativo.
+
     ``ler_captura`` dá acesso à carga bruta na custódia; sem ele, a T10 (texto de editais) não
     encontra nada.
 
@@ -759,26 +791,37 @@ def executar(
     detectados: dict[str, AlertaDetectado] = {}
     caso = sessao.get(Caso, caso_id)
     avisos = dict((caso.avisos_tipologias if caso is not None else None) or {})
-    for nome in pedidas:
+    fracos = sinais_fracos()
+    sinais: list[AlertaDetectado] = []
+    for nome in [*(p for p in pedidas if p not in fracos), *(fracos if combinar else [])]:
         antes = len(ctx.avisos)
-        for d in TIPOLOGIAS[nome](ctx, parametros):
-            detectados.setdefault(d.chave, d)
+        if nome in fracos:
+            sinais += avaliar_sinais_fracos(ctx, parametros, [nome])
+        else:
+            for d in TIPOLOGIAS[nome](ctx, parametros):
+                detectados.setdefault(d.chave, d)
         avisos.pop(nome, None)
         if len(ctx.avisos) > antes:
             avisos[nome] = _limitar_avisos(nome, ctx.avisos[antes:])
     if caso is not None:
         caso.avisos_tipologias = avisos
 
-    alertas = _reconciliar(sessao, caso_id, pedidas, detectados, limiares)
+    # Os sinais fracos entram na reconciliação sem nenhum detectado: é o que tira da fila os
+    # alertas L14 e L15 gravados antes de eles deixarem de gerar alerta próprio.
+    limpar = [*pedidas, *(f for f in fracos if combinar and f not in pedidas)]
+    alertas = _reconciliar(sessao, caso_id, limpar, detectados, limiares)
     if combinar:
         # A combinação lê TODOS os alertas ativos do caso, inclusive os de tipologias que não
-        # foram pedidas nesta execução, já com o resultado das que acabaram de rodar.
+        # foram pedidas nesta execução, já com o resultado das que acabaram de rodar, e os
+        # sinais fracos avaliados agora.
         ativos = list(
             sessao.execute(
                 select(Alerta).where(Alerta.caso_id == caso_id, Alerta.ativo.is_(True))
             ).scalars()
         )
-        combinados = {d.chave: d for d in combinacao.detectar(ativos, ctx.entidades, parametros)}
+        combinados = {
+            d.chave: d for d in combinacao.detectar(ativos, ctx.entidades, parametros, sinais)
+        }
         alertas += _reconciliar(sessao, caso_id, [CODIGO_COMBINACAO], combinados, limiares)
     return ordenar(alertas)
 

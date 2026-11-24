@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 
@@ -36,6 +37,71 @@ def mascarar_cpf(cpf: str | None) -> str:
     if len(digitos) == 6:
         return f"***{digitos}**"
     return ""
+
+
+# ---- Contato do estabelecimento (telefone e correio eletrônico; tipologia L2) -------------------
+#
+# Leiaute dos dados abertos do CNPJ, Estabelecimentos: ``ddd_1``, ``telefone_1``, ``ddd_2``,
+# ``telefone_2`` e ``correio_eletronico`` (metadados do CNPJ, Receita Federal). Telefone e e-mail
+# são dado pessoal quando a empresa é MEI ou individual (docs/lavagem/tipologias-lavagem.md, seção
+# 6, item 4). Por minimização (RNF04, decisão do autor), a resolução NÃO guarda o valor completo
+# no atributo da entidade: guarda a chave de comparação (resumo SHA-256 do valor normalizado) e a
+# forma mascarada para exibição. O valor completo continua só na captura custodiada, que é a
+# prova. O resumo serve para comparar sem exibir; não é proteção criptográfica do número.
+
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$")
+
+
+def normalizar_telefone(ddd: str | None, numero: str | None) -> str:
+    """DDD (2 dígitos) seguido do número (8 ou 9 dígitos), só dígitos; ``""`` se não for um
+    telefone comparável (sem DDD, tamanho errado ou um dígito só repetido, que é preenchimento)."""
+    area = somente_digitos(ddd).lstrip("0")
+    local = somente_digitos(numero)
+    if len(area) != 2 or len(local) not in (8, 9) or len(set(local)) == 1:
+        return ""
+    return area + local
+
+
+def normalizar_email(texto: str | None) -> str:
+    """Minúsculas e sem espaços nas pontas; ``""`` se não tiver a forma ``local@dominio.tld``."""
+    email = (texto or "").strip().lower()
+    return email if _EMAIL.fullmatch(email) else ""
+
+
+def mascarar_telefone(normalizado: str) -> str:
+    """``6155501234`` -> ``(61) ****-**34``: ficam o DDD e os dois últimos dígitos."""
+    if len(normalizado) not in (10, 11):
+        return ""
+    return f"({normalizado[:2]}) {'*' * (len(normalizado) - 6)}-**{normalizado[-2:]}"
+
+
+def mascarar_email(normalizado: str) -> str:
+    """``contato@dominio.com.br`` -> ``c***@dominio.com.br``: a primeira letra e o domínio."""
+    local, _, dominio = normalizado.partition("@")
+    return f"{local[:1]}***@{dominio}" if local and dominio else ""
+
+
+def contatos(
+    ddd_1: str = "",
+    telefone_1: str = "",
+    ddd_2: str = "",
+    telefone_2: str = "",
+    correio_eletronico: str = "",
+) -> list[dict]:
+    """Contatos comparáveis de um estabelecimento: ``[{"tipo", "chave", "mascarado"}]``, sem
+    repetição, telefones antes do e-mail. Valor inválido ou vazio fica de fora."""
+    valores = [
+        ("telefone", normalizar_telefone(ddd_1, telefone_1), mascarar_telefone),
+        ("telefone", normalizar_telefone(ddd_2, telefone_2), mascarar_telefone),
+        ("email", normalizar_email(correio_eletronico), mascarar_email),
+    ]
+    itens: dict[str, dict] = {}
+    for tipo, valor, mascarar in valores:
+        if not valor:
+            continue
+        chave = hashlib.sha256(f"{tipo}:{valor}".encode()).hexdigest()
+        itens.setdefault(chave, {"tipo": tipo, "chave": chave, "mascarado": mascarar(valor)})
+    return list(itens.values())
 
 
 def data_layout_para_iso(texto: str | None) -> str:
