@@ -147,3 +147,72 @@ def test_parametros_efetivos_valida():
         tipologias.parametros_efetivos(PADRAO, {"inexistente": 1})
     with pytest.raises(ValueError):
         tipologias.parametros_efetivos(PADRAO, {"t3_razao_minima": -1})
+
+
+# ==== T2: só conta estabelecimento ATIVO (achado do piloto de 24/11/2026) =======================
+
+
+@pytest.fixture
+def cenario(sessao, custodia, config):
+    from tests.apoio_lavagem import Cenario
+
+    return Cenario(sessao, custodia, config)
+
+
+def _tres_no_mesmo_endereco_por_filiais(cenario, situacao_da_terceira: str) -> str:
+    """Três empresas sintéticas dividem um endereço: a contratada pela matriz e as outras duas por
+    filial (as matrizes delas ficam em outros endereços). Devolve o CNPJ da filial da terceira."""
+    cenario.empresa("91000001", "UM CONTRATADA SINTETICA LTDA", logradouro="DO PONTO COMUM")
+    cenario.empresa("91000002", "DOIS FILIAL ATIVA SINTETICA LTDA", logradouro="DA MATRIZ DOIS")
+    cenario.empresa("91000003", "TRES FILIAL SINTETICA LTDA", logradouro="DA MATRIZ TRES")
+    cenario.filial("91000002", logradouro="DO PONTO COMUM")
+    filial = cenario.filial("91000003", logradouro="DO PONTO COMUM", situacao=situacao_da_terceira)
+    cenario.contrato("91000001", "2026-03-01")
+    return filial
+
+
+def test_t2_nao_conta_filial_baixada(cenario):
+    # Sem a filial baixada sobram duas empresas ativas no endereço, abaixo do mínimo de três.
+    _tres_no_mesmo_endereco_por_filiais(cenario, situacao_da_terceira="08")
+    assert cenario.alertas("T2") == []
+    # Com o mínimo em duas, o alerta aparece só com as duas empresas de estabelecimento ativo.
+    (alerta,) = cenario.alertas("T2", t2_minimo_empresas=2)
+    assert cenario.rotulos(alerta) == {
+        "UM CONTRATADA SINTETICA LTDA",
+        "DOIS FILIAL ATIVA SINTETICA LTDA",
+    }
+    assert alerta.parametros["empresas_no_endereco"] == 2
+    assert not any("TRES FILIAL" in e["descricao"] for e in alerta.evidencias)
+
+
+@pytest.mark.parametrize("situacao", ["01", "3", "04", "08"])
+def test_t2_nao_conta_estabelecimento_em_situacao_diferente_de_ativa(cenario, situacao):
+    _tres_no_mesmo_endereco_por_filiais(cenario, situacao_da_terceira=situacao)
+    assert cenario.alertas("T2") == []
+
+
+def test_t2_conta_filial_ativa_e_diz_que_so_contam_ativos(cenario):
+    filial = _tres_no_mesmo_endereco_por_filiais(cenario, situacao_da_terceira="2")
+    (alerta,) = cenario.alertas("T2")
+    assert len(cenario.rotulos(alerta)) == 3
+    assert alerta.parametros["empresas_no_endereco"] == 3
+    assert alerta.parametros["estabelecimentos_sem_situacao"] == 0
+    assert "situação cadastral ATIVA" in alerta.motivo
+    da_filial = [e for e in alerta.evidencias if filial in e["descricao"]]
+    assert len(da_filial) == 1 and "situação ATIVA" in da_filial[0]["descricao"]
+    from buscador.tipologias.catalogo import catalogo
+
+    (item,) = [t for t in catalogo(cenario.padrao) if t["codigo"] == "T2"]
+    assert "ATIVA" in item["regra"]
+
+
+def test_t2_conta_estabelecimento_sem_situacao_informada_e_avisa(cenario):
+    # Política de erro da T2: prefere evitar falso negativo. Sem o código não se sabe se o
+    # estabelecimento foi baixado, então ele continua contando, e o alerta deixa isso à vista.
+    filial = _tres_no_mesmo_endereco_por_filiais(cenario, situacao_da_terceira="")
+    (alerta,) = cenario.alertas("T2")
+    assert len(cenario.rotulos(alerta)) == 3
+    assert alerta.parametros["estabelecimentos_sem_situacao"] == 1
+    assert "situação cadastral não informada" in alerta.motivo
+    da_filial = [e for e in alerta.evidencias if filial in e["descricao"]]
+    assert len(da_filial) == 1 and "situação não informada" in da_filial[0]["descricao"]

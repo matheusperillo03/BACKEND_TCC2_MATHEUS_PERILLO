@@ -96,8 +96,10 @@ POLITICAS: dict[str, Politica] = {
         severidade="baixa",
         prefere_evitar=EVITA_FALSO_NEGATIVO,
         politica_erro=(
-            "Prefere evitar falso negativo: aponta todo endereço com várias empresas em que ao "
-            "menos uma é contratada. O falso positivo é frequente (escritório de contabilidade, "
+            "Prefere evitar falso negativo: aponta todo endereço com várias empresas de "
+            "estabelecimento ativo em que ao menos uma é contratada. Estabelecimento baixado, "
+            "inapto, suspenso ou nulo não conta; o que vem sem situação informada conta, com "
+            "aviso no alerta. O falso positivo é frequente (escritório de contabilidade, "
             "coworking, endereço fiscal comum), por isso a severidade é baixa e o alerta serve "
             "para orientar a análise de vínculos, não para concluir."
         ),

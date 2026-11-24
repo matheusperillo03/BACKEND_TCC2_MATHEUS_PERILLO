@@ -120,6 +120,40 @@ class Cenario:
         )
         return basico
 
+    def filial(
+        self,
+        basico: str,
+        *,
+        ordem: str = "0002",
+        situacao: str = "02",
+        inicio: str = "20160101",
+        logradouro: str = "DAS AMOSTRAS SINTETICAS",
+        numero: str = "100",
+        complemento: str = "",
+    ) -> str:
+        """Filial sintética de uma empresa já criada com ``empresa``; devolve o CNPJ completo."""
+        self.registros.append(
+            RegistroEstabelecimento(
+                captura_id=self.captura("cnpj_arquivo"),
+                cnpj_basico=basico,
+                cnpj_ordem=ordem,
+                cnpj_dv=calcular_dv_cnpj(basico + ordem),
+                matriz_filial="2",
+                situacao_cadastral=situacao,
+                data_inicio_atividade=inicio,
+                cnae_fiscal_principal="4120400",
+                tipo_logradouro="RUA",
+                logradouro=logradouro,
+                numero=numero,
+                complemento=complemento,
+                bairro="CENTRO",
+                cep="70000900",
+                uf="DF",
+                municipio="9701",
+            )
+        )
+        return cnpj(basico, ordem)
+
     def socio(
         self,
         basico: str,
