@@ -8,3 +8,4 @@ dados/
 .env.*
 !.env.example
 dados-reais/
+tls/

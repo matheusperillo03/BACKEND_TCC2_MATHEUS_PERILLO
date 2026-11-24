@@ -9,3 +9,4 @@ __pycache__
 .env.*
 PROGRESSO.md
 dados-reais
+tls

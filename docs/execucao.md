@@ -22,6 +22,7 @@ O projeto Compose chama-se `osint-tcc`. Sem as variáveis obrigatórias, o `dock
 - **Porta do PostgreSQL.** Não é publicada por padrão. Para acessar o banco do host, habilite de propósito: `docker compose -f docker-compose.yml -f docker-compose.postgres-porta.yml up -d` (publica em `127.0.0.1:55432`).
 - **Vindo de uma versão anterior.** Um banco criado antes do horizonte 1 do backlog (sem finalidade do caso, coletas, versão do conector e decisões de alerta) é atualizado no lugar: `python -m buscador.migrar` (o serviço `migracao` do Compose, que roda a cada `up`) cria as tabelas novas, acrescenta as colunas novas às tabelas existentes e refaz as concessões, sem apagar nada (ver [modelo-de-dados.md](modelo-de-dados.md)). Só a cadeia de auditoria versão 1 não é migrável (ver "Auditoria", em [arquitetura.md](arquitetura.md)): nesse caso, recrie os volumes com `docker compose down -v` (os dados do MVP são de demonstração).
 - **Documentação OpenAPI.** `/docs`, `/redoc` e `/openapi.json` não exigem token e por isso só existem com `MODO_DEV=1`.
+- **Acesso de fora da máquina.** Sem `URL_PUBLICA` a API só responde a requisições feitas pela própria máquina; às demais, `421`. Para atender outra máquina é preciso TLS e `MODO_DEV=0` (ver "Acesso de fora da máquina e TLS", em [seguranca.md](seguranca.md)).
 
 ## Sem Docker (desenvolvimento, SQLite)
 

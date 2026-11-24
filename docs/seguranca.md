@@ -12,7 +12,29 @@ A cadeia de custódia e a trilha de auditoria estão em [arquitetura.md](arquite
 - **Para quem é obrigatório.** `MFA_PERFIS_OBRIGATORIOS` (padrão: os três perfis). O usuário cadastra o segundo fator no primeiro login; o administrador nunca vê o segredo. O segredo fica no banco cifrado com AES-256-GCM (chave fora do banco).
 - **Sessão.** Token opaco de 256 bits, guardado no banco só como SHA-256. Decisão: sessão no servidor em vez de JWT, porque logout, desativação da conta e troca de senha precisam valer na hora, e um JWT continua válido até expirar. Expira pela duração máxima (`SESSAO_DURACAO_MINUTOS`, 480) e por inatividade (`SESSAO_INATIVIDADE_MINUTOS`, 30).
 - **Força bruta.** `LOGIN_MAX_FALHAS` falhas seguidas (de senha ou de código) bloqueiam a conta por `LOGIN_BLOQUEIO_MINUTOS`. A resposta de falha é a mesma para login inexistente e senha errada, e o tempo de resposta também (um hash fictício é verificado quando o login não existe).
-- **Tokens de desenvolvimento.** `TOKENS_DEV` só vale com `MODO_DEV=1` (que também liga `/docs`). Com `MODO_DEV=0`, um `TOKENS_DEV` preenchido impede o serviço de iniciar. Quem usa token de desenvolvimento não passa por senha nem MFA: é só para a máquina do desenvolvedor e para os testes. **Atenção ao atualizar:** um `.env` de versão anterior, com `TOKENS_DEV` preenchido e `MODO_DEV=0`, precisa esvaziar `TOKENS_DEV` (e criar os usuários) ou declarar `MODO_DEV=1`; e precisa ganhar `CUSTODIA_CHAVE`.
+- **Tokens de desenvolvimento.** `TOKENS_DEV` só vale com `MODO_DEV=1` (que também liga `/docs`). Com `MODO_DEV=0`, um `TOKENS_DEV` preenchido impede o serviço de iniciar. Quem usa token de desenvolvimento não passa por senha nem MFA: é só para a máquina do desenvolvedor e para os testes. Com `MODO_DEV=1` e `URL_PUBLICA` de fora da máquina o serviço não inicia, e sem `URL_PUBLICA` a API não responde a requisições que chegam por outro nome (ver "Acesso de fora da máquina e TLS"). **Atenção ao atualizar:** um `.env` de versão anterior, com `TOKENS_DEV` preenchido e `MODO_DEV=0`, precisa esvaziar `TOKENS_DEV` (e criar os usuários) ou declarar `MODO_DEV=1`; e precisa ganhar `CUSTODIA_CHAVE`.
+
+### Acesso de fora da máquina e TLS (RNF01, 23/11/2026)
+
+Regra: **na própria máquina o sistema atende em http; fora dela, só por https, com `MODO_DEV=0` e com o endereço declarado.** Quatro travas, todas com teste em `tests/test_acesso_externo.py`:
+
+1. **`URL_PUBLICA` com `http` fora da máquina:** o serviço não inicia (`ErroConfiguracao`). "Própria máquina" é `localhost` ou um IP de loopback.
+2. **`MODO_DEV=1` com `URL_PUBLICA` de fora da máquina:** o serviço não inicia. Os tokens fixos dispensam senha e MFA e não podem ficar alcançáveis de fora.
+3. **`Host` da requisição:** a API responde `421` quando o `Host` não é local nem o nome de `URL_PUBLICA` (`HostPermitido`, em `buscador/api/app.py`). O nginx do front-end repassa o `Host` que recebeu. Consequência: um ambiente de desenvolvimento (`MODO_DEV=1`, sem `URL_PUBLICA`) publicado por engano num proxy ou numa VPN não responde por esse endereço, nem em `/health`.
+4. **Token de desenvolvimento com `MODO_DEV=0`:** `401` em qualquer rota; o mapa de tokens fica vazio.
+
+Duas formas de ter TLS (o código não escolhe; a regra acima vale para as duas):
+
+- **Proxy com TLS na frente do nginx (a forma do guia de implantação do piloto).** O Tailscale Serve termina o HTTPS, com certificado emitido para o nome da máquina na rede privada, e repassa para `http://127.0.0.1:8090`. Nada muda no Compose; no `.env` do ambiente, `URL_PUBLICA=https://<nome>.<rede>.ts.net`. O trecho entre o proxy e o nginx é local (loopback da mesma máquina), sem TLS.
+- **TLS no próprio nginx.** `docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`, com `URL_PUBLICA` e `TLS_DIR_CERTIFICADO` (pasta do host com `servidor.crt` e `servidor.key`, montada só para leitura; `tls/` está no `.gitignore` e no `.dockerignore`). O nginx atende HTTPS na 443 (TLS 1.2 e 1.3), envia `Strict-Transport-Security` e redireciona para https o pedido http que não vem de localhost. As portas 443 e 80 são publicadas em `TLS_ENDERECO` (padrão `127.0.0.1`). A configuração está no repositório do front-end (`nginx-tls.conf`).
+
+Limites, para não prometer mais do que há:
+
+- O trecho nginx → API é http, na rede interna do Compose (mesma máquina). Não há TLS entre contêineres nem entre a API e o PostgreSQL.
+- A trava 3 confia no cabeçalho `Host`, que o cliente escolhe. Ela barra a exposição por descuido; não barra quem já alcança a porta e forja `Host: localhost`. Contra isso valem as portas publicadas só em `127.0.0.1` e a política de acesso da rede privada.
+- Não há cookie: o token da sessão vai no cabeçalho `Authorization` e fica no `sessionStorage` do navegador. Por isso não há atributo `Secure` a configurar; a proteção em trânsito é o próprio TLS, mais o HSTS.
+- **Ao atualizar um ambiente já acessado por VPN** (o do piloto), acrescente `URL_PUBLICA=https://<nome>.<rede>.ts.net` ao arquivo de ambiente antes de subir. Sem isso a API passa a responder `421` pelo endereço da VPN.
+- Não testado com o Tailscale real nesta entrega: se o Serve repassa o `Host` original ao nginx (é o que a trava 3 supõe). Se ele reescrever o `Host` para `127.0.0.1`, o acesso continua funcionando, mas a trava 3 deixa de distinguir o acesso de fora.
 
 ## H23: acesso por caso
 

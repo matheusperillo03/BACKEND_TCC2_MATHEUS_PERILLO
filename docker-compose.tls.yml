@@ -1,0 +1,32 @@
+# Arquivo opcional: TLS no próprio nginx do front-end (RNF01), para quando não há um proxy com
+# TLS na frente (o guia de implantação do piloto usa o Tailscale Serve, que já termina o HTTPS;
+# nesse caso este arquivo não é necessário).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+#
+# Variáveis (no .env; nenhuma tem segredo, mas a pasta do certificado tem):
+#   URL_PUBLICA           obrigatória: https://<nome do certificado>. A API não inicia com http
+#                         nem com MODO_DEV=1 quando o endereço é de fora da máquina.
+#   TLS_DIR_CERTIFICADO   obrigatória: pasta do HOST, fora do repositório (ou em ./tls, ignorada
+#                         pelo git e pela imagem), com `servidor.crt` (certificado e cadeia, PEM)
+#                         e `servidor.key` (chave privada, PEM, legível pelo usuário do nginx no
+#                         contêiner). É montada só para leitura; nada dela entra na imagem.
+#   TLS_ENDERECO          opcional: endereço do host em que as portas 443 e 80 são publicadas.
+#                         Padrão 127.0.0.1. Para atender outra máquina, use o IP da interface da
+#                         rede privada; evite 0.0.0.0.
+#
+# Com este arquivo o nginx atende HTTPS na 443, envia Strict-Transport-Security e redireciona
+# para https todo pedido http que não venha de localhost. A porta 8090 continua em 127.0.0.1,
+# para o operador na própria máquina. O trecho nginx -> API fica na rede interna do Compose.
+services:
+  api:
+    environment:
+      URL_PUBLICA: ${URL_PUBLICA:?defina URL_PUBLICA no .env (https://<nome do certificado>)}
+
+  frontend:
+    command: ["nginx", "-c", "/etc/nginx/nginx-tls.conf", "-g", "daemon off;"]
+    ports:
+      - "${TLS_ENDERECO:-127.0.0.1}:443:8443"
+      - "${TLS_ENDERECO:-127.0.0.1}:80:8080"
+    volumes:
+      - ${TLS_DIR_CERTIFICADO:?defina TLS_DIR_CERTIFICADO no .env (pasta com servidor.crt e servidor.key)}:/etc/nginx/tls:ro
