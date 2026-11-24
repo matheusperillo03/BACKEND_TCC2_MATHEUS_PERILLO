@@ -457,7 +457,7 @@ _CAND = (
 )
 
 
-def test_tse_nr_cpf_candidato_nunca_e_lido_e_o_texto_da_captura_o_oculta(ambiente, cpfs):
+def test_tse_cpf_inteiro_do_candidato_nunca_sai_e_o_texto_da_captura_o_oculta(ambiente, cpfs):
     cliente, caso_id = ambiente["cliente"], ambiente["caso_id"]
     cpf = cpfs["candidato"]
     arquivo = ambiente["tse"] / "consulta_cand_2026_DF.csv"
@@ -485,9 +485,10 @@ def test_tse_nr_cpf_candidato_nunca_e_lido_e_o_texto_da_captura_o_oculta(ambient
     assert cpf.encode() in bruto
 
 
-def test_tse_registros_nao_dependem_da_coluna_nr_cpf_candidato(tmp_path):
-    """O conector não lê ``NR_CPF_CANDIDATO``: com a coluna preenchida, vazia ou ausente, os
-    registros são idênticos e nenhum campo deles contém o CPF."""
+def test_tse_do_cpf_do_candidato_so_ficam_os_seis_digitos_centrais(tmp_path):
+    """Decisão do autor de 23/11/2026 (opção a): o conector lê ``NR_CPF_CANDIDATO`` e a reduz, na
+    leitura, aos seis dígitos centrais. Com a coluna vazia ou ausente o registro é o mesmo, sem
+    os dígitos; em nenhum caso um campo do registro contém o CPF inteiro."""
     cpf = cpf_sintetico()
 
     def registros(conteudo: str) -> list:
@@ -510,5 +511,9 @@ def test_tse_registros_nao_dependem_da_coluna_nr_cpf_candidato(tmp_path):
     ausente = registros(
         _CAND.format(cpf="x").replace('"NR_CPF_CANDIDATO";', "").replace('"x";', "")
     )
-    assert com == sem == ausente and len(com) == 1
-    assert cpf not in repr(com)
+    assert sem == ausente and len(com) == len(sem) == 1
+    assert com[0].cpf_parcial == mascarado(cpf) and sem[0].cpf_parcial == ""
+    com[0].cpf_parcial = ""
+    assert com == sem
+    assert cpf not in repr(registros(_CAND.format(cpf=cpf)))
+    assert cpf[:3] + cpf[3:9] not in repr(registros(_CAND.format(cpf=cpf)))

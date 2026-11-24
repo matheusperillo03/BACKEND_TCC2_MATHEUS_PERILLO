@@ -85,7 +85,7 @@ from buscador.modelos import (
     SugestaoIA,
     iso_utc,
 )
-from buscador.privacidade import descaracterizar_texto
+from buscador.privacidade import descaracterizar_texto, ocultar_titulo_em_csv
 from buscador.resolucao import Resolvedor
 from buscador.resolucao.normalizacao import (
     cnpj_valido,
@@ -198,7 +198,7 @@ def texto_da_captura(
     # RNF04: o texto que sai da custódia para a API, para a interface e para o modelo local leva
     # todo CPF descaracterizado. A troca preserva o comprimento, então as posições dos trechos
     # continuam valendo; ``texto_sha256`` continua sendo o resumo do texto ORIGINAL extraído.
-    apresentavel = descaracterizar_texto(documento.texto)
+    apresentavel = ocultar_titulo_em_csv(descaracterizar_texto(documento.texto))
     return Texto(
         apresentavel[:max_caracteres],
         documento.codificacao,

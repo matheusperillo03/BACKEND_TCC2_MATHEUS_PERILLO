@@ -42,6 +42,7 @@ from buscador.resolucao.normalizacao import (
     normalizar_nome,
     somente_digitos,
 )
+from buscador.resolucao.servico import ORIGEM_ATRIBUTOS
 from buscador.seguranca import caractere_proibido, sanitizar_json, texto_de_linha
 
 registro = logging.getLogger(__name__)
@@ -81,6 +82,39 @@ def _entidade_resumo(e: Entidade) -> dict:
         "identificador": e.identificador or "",
         "atributos": sanitizar_json(e.atributos or {}),
     }
+
+
+def _sugestao_para_dict(s: Sugestao, candidata: Entidade | None) -> dict:
+    return {
+        "id": s.id,
+        "candidata_id": s.candidata_id,
+        "candidata_rotulo": candidata.rotulo if candidata else None,
+        "candidata_identificador": candidata.identificador if candidata else None,
+        "candidata_tipo": candidata.tipo if candidata else None,
+        "score": s.score,
+        "motivo": s.motivo,
+        "criado_em": s.criado_em,
+        "situacao": s.situacao or "pendente",
+        "decidido_por": s.decidido_por,
+        "decidido_em": s.decidido_em,
+        "justificativa_decisao": s.justificativa_decisao,
+    }
+
+
+def _candidaturas_da_pessoa(ctx: Contexto, candidato: Entidade) -> list[Entidade]:
+    """As candidaturas do caso com o mesmo resumo do título eleitoral (inclusive a própria), da
+    eleição mais antiga para a mais recente. Sem resumo, só a própria. As entidades não são
+    fundidas: cada candidatura continua com o seu ``SQ_CANDIDATO``."""
+    if not candidato.chave_pessoa:
+        return [candidato]
+    mesmas = ctx.sessao.execute(
+        select(Entidade).where(
+            Entidade.caso_id == candidato.caso_id,
+            Entidade.tipo == "candidato",
+            Entidade.chave_pessoa == candidato.chave_pessoa,
+        )
+    ).scalars()
+    return sorted(mesmas, key=lambda e: (str((e.atributos or {}).get("ano") or ""), e.chave))
 
 
 def _decisao_para_dict(d: AlertaDecisao) -> dict:
@@ -353,10 +387,11 @@ def _expandir_do_caso(ctx: Contexto, caso_id: str, fonte: str, parametros: dict)
         "portal_transparencia",
         "pncp_termos",
         "tse_arquivo",
+        "tse_bens",
     ):
         return parametros
     expandido = {k: v for k, v in parametros.items() if k != "do_caso"}
-    if fonte == "tse_arquivo":
+    if fonte in ("tse_arquivo", "tse_bens"):
         # Candidatos que já estão no caso (colete antes o arquivo de candidatos, com 'uf' e
         # 'municipio'): só as linhas desses SQ_CANDIDATO são lidas do arquivo de receitas.
         sqs = sorted(
@@ -812,17 +847,23 @@ def ver_entidade(caso_id: str, entidade_id: str, ctx: Contexto = Depends(context
         candidata = ctx.sessao.get(Entidade, s.candidata_id)
         if candidata is not None and candidata.caso_id != caso_id:
             candidata = None
-        sugestoes.append(
-            {
-                "id": s.id,
-                "candidata_id": s.candidata_id,
-                "candidata_rotulo": candidata.rotulo if candidata else None,
-                "candidata_identificador": candidata.identificador if candidata else None,
-                "score": s.score,
-                "motivo": s.motivo,
-                "criado_em": s.criado_em,
-            }
-        )
+        sugestoes.append(_sugestao_para_dict(s, candidata))
+    outras = []
+    if entidade.tipo == "candidato":
+        for outra in _candidaturas_da_pessoa(ctx, entidade):
+            if outra.id == entidade.id:
+                continue
+            atributos = outra.atributos or {}
+            outras.append(
+                {
+                    "entidade_id": outra.id,
+                    "rotulo": outra.rotulo,
+                    "ano": str(atributos.get("ano") or ""),
+                    "cargo": str(atributos.get("cargo") or ""),
+                    "uf": str(atributos.get("uf") or ""),
+                    "situacao_turno": str(atributos.get("situacao_turno") or ""),
+                }
+            )
     ctx.auditar("entidade.ver", caso_id, {"entidade_id": entidade_id, "tipo": entidade.tipo})
     ctx.concluir()
     return {
@@ -830,7 +871,167 @@ def ver_entidade(caso_id: str, entidade_id: str, ctx: Contexto = Depends(context
         "captura_id": entidade.captura_id,
         "fontes": fontes,
         "sugestoes": sugestoes,
+        "outras_candidaturas": outras,
     }
+
+
+NOTA_PATRIMONIO = (
+    "Declarado ao TSE no registro da candidatura; valor informado pelo candidato (não é "
+    "avaliação de mercado). Só há dado de quem foi candidato."
+)
+SEM_RENDA_PUBLICA = (
+    "O sistema ainda não coleta remuneração pública (a fonte de renda não foi definida): a linha "
+    "do tempo mostra só os bens declarados, e o alerta de evolução patrimonial (L11) não é gerado."
+)
+
+
+@roteador.get(
+    "/{caso_id}/entidades/{entidade_id}/patrimonio",
+    response_model=esquemas.LinhaDoTempoPatrimonial,
+)
+def ver_patrimonio(caso_id: str, entidade_id: str, ctx: Contexto = Depends(contexto)):
+    """Linha do tempo patrimonial do candidato (RF05, H51): os bens declarados ao TSE em cada
+    eleição em que a pessoa foi candidata, somados e por tipo, com a captura de origem.
+
+    As candidaturas são ligadas pelo título eleitoral (comparado só pelo resumo com chave). Sem
+    renda pública conhecida não há alerta: a linha é só informativa."""
+    ctx.caso_aberto(caso_id, "patrimonio.ver")
+    entidade = (
+        ctx.sessao.get(Entidade, entidade_id) if len(entidade_id) <= MAX_IDENTIFICADOR else None
+    )
+    if entidade is None or entidade.caso_id != caso_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"Entidade {entidade_id} não encontrada no caso."
+        )
+    if entidade.tipo != "candidato":
+        raise HTTPException(
+            422,
+            "A linha do tempo patrimonial só existe para candidato (bens declarados ao TSE).",
+        )
+    candidaturas = _candidaturas_da_pessoa(ctx, entidade)
+    pontos = []
+    for candidatura in candidaturas:
+        atributos = sanitizar_json(candidatura.atributos or {})
+        bens = atributos.get("bens") or []
+        captura_id = (atributos.get(ORIGEM_ATRIBUTOS) or {}).get("bens_total")
+        captura = ctx.sessao.get(Captura, captura_id) if captura_id else None
+        if captura is not None and captura.caso_id != caso_id:
+            captura = None
+        por_tipo: dict[str, list[float]] = {}
+        for bem in bens:
+            if bem.get("valor") is not None:
+                por_tipo.setdefault(bem.get("tipo") or "Tipo não informado", []).append(
+                    float(bem["valor"])
+                )
+        pontos.append(
+            {
+                "entidade_id": candidatura.id,
+                "rotulo": candidatura.rotulo,
+                "ano": str(atributos.get("ano") or ""),
+                "cargo": str(atributos.get("cargo") or ""),
+                "uf": str(atributos.get("uf") or ""),
+                "total": atributos.get("bens_total") if captura is not None else None,
+                "quantidade": len(bens),
+                "por_tipo": [
+                    {"tipo": tipo, "total": round(sum(valores), 2), "quantidade": len(valores)}
+                    for tipo, valores in sorted(por_tipo.items())
+                ],
+                "bens": [
+                    {
+                        "ordem": str(bem.get("ordem") or ""),
+                        "tipo": str(bem.get("tipo") or ""),
+                        "descricao": str(bem.get("descricao") or ""),
+                        "valor": bem.get("valor"),
+                        "atualizado_em": str(bem.get("atualizado_em") or ""),
+                    }
+                    for bem in bens
+                ],
+                "captura_id": captura.id if captura else None,
+                "sha256": captura.sha256 if captura else None,
+                "fonte": captura.fonte if captura else None,
+                "url_ou_arquivo": captura.url_ou_arquivo if captura else None,
+            }
+        )
+    com_valor = [p for p in pontos if p["total"] is not None]
+    variacoes = [
+        {
+            "de_ano": anterior["ano"],
+            "para_ano": atual["ano"],
+            "diferenca": round(atual["total"] - anterior["total"], 2),
+            "percentual": round((atual["total"] - anterior["total"]) / anterior["total"] * 100, 2)
+            if anterior["total"]
+            else None,
+        }
+        for anterior, atual in zip(com_valor, com_valor[1:], strict=False)
+    ]
+    ctx.auditar(
+        "patrimonio.ver",
+        caso_id,
+        {"entidade_id": entidade_id, "candidaturas": len(candidaturas), "pontos": len(com_valor)},
+    )
+    ctx.concluir()
+    return {
+        "entidade_id": entidade.id,
+        "ligacao": "titulo_eleitoral" if len(candidaturas) > 1 else "candidatura_unica",
+        "nota": NOTA_PATRIMONIO,
+        "pontos": pontos,
+        "variacoes": variacoes,
+        "renda_publica": {"conhecida": False, "motivo": SEM_RENDA_PUBLICA},
+    }
+
+
+@roteador.post("/{caso_id}/sugestoes/{sugestao_id}/decisao", response_model=esquemas.SugestaoSaida)
+def decidir_sugestao(
+    caso_id: str,
+    sugestao_id: str,
+    corpo: esquemas.DecisaoEntrada,
+    ctx: Contexto = Depends(contexto),
+):
+    """Confirma ou descarta uma sugestão de resolução (RF02; decisão do autor de 23/11/2026).
+
+    A sugestão é pista: quem decide é o investigador, com justificativa. A decisão vale para o
+    par (os dois sentidos da sugestão), fica na trilha de auditoria e NÃO funde as entidades:
+    confirmar só registra que o investigador aceita a ligação. Rever é uma nova decisão."""
+    ctx.caso_aberto(caso_id, "sugestao.decidir")
+    sugestao = (
+        ctx.sessao.get(Sugestao, sugestao_id) if len(sugestao_id) <= MAX_IDENTIFICADOR else None
+    )
+    if sugestao is None or sugestao.caso_id != caso_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, f"Sugestão {sugestao_id} não encontrada no caso."
+        )
+    situacao_anterior = sugestao.situacao or "pendente"
+    par = ctx.sessao.execute(
+        select(Sugestao).where(
+            Sugestao.caso_id == caso_id,
+            Sugestao.entidade_id.in_((sugestao.entidade_id, sugestao.candidata_id)),
+            Sugestao.candidata_id.in_((sugestao.entidade_id, sugestao.candidata_id)),
+        )
+    ).scalars()
+    decidido_em = iso_utc()
+    for item in par:
+        item.situacao = corpo.decisao
+        item.decidido_por = ctx.usuario.usuario
+        item.decidido_em = decidido_em
+        item.justificativa_decisao = corpo.justificativa
+    ctx.sessao.flush()
+    ctx.auditar(
+        "sugestao.decidir",
+        caso_id,
+        {
+            "sugestao_id": sugestao.id,
+            "entidade_id": sugestao.entidade_id,
+            "candidata_id": sugestao.candidata_id,
+            "decisao": corpo.decisao,
+            "justificativa_decisao": corpo.justificativa,
+            "situacao_anterior": situacao_anterior,
+            "revisao": situacao_anterior != "pendente",
+            "decidido_em": decidido_em,
+        },
+    )
+    ctx.concluir()
+    candidata = ctx.sessao.get(Entidade, sugestao.candidata_id)
+    return _sugestao_para_dict(sugestao, candidata)
 
 
 @roteador.get("/{caso_id}/grafo", response_model=esquemas.GrafoSaida)

@@ -22,6 +22,7 @@ de 96 bits, gerado a cada cifragem.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 from pathlib import Path
 
@@ -70,6 +71,26 @@ def ler_chave_de_arquivo(caminho: Path, nome: str = "CUSTODIA_CHAVE_ARQUIVO") ->
 
 def id_da_chave(chave: bytes) -> bytes:
     return hashlib.sha256(b"buscador-osint/id-da-chave/" + chave).digest()[:_TAMANHO_ID]
+
+
+def resumo_identificador(chave: bytes, contexto: str, dados: bytes) -> str:
+    """Resumo com chave (HMAC-SHA256, em hexadecimal) de um identificador, com subchave própria
+    do contexto, derivada de ``chave`` (a ``CHAVE_IDENTIFICADORES``, que não é a da custódia).
+
+    Serve para reconhecer o mesmo identificador sem guardá-lo (o título eleitoral do candidato,
+    contexto ``titulo-eleitoral``). Um identificador curto e só de dígitos seria recuperável por
+    força bruta a partir de um SHA-256 sem chave; com a chave, quem lê o banco não refaz o
+    resumo. Trocar a chave muda os resumos: registros resumidos com a chave anterior deixam de
+    coincidir com os novos até serem recoletados."""
+    if len(chave) != TAMANHO_CHAVE:
+        raise ErroCripto("A chave dos identificadores deve ter 32 bytes.")
+    subchave = HKDF(
+        algorithm=hashes.SHA256(),
+        length=TAMANHO_CHAVE,
+        salt=None,
+        info=b"buscador-osint/v1/resumo/" + contexto.encode("ascii"),
+    ).derive(chave)
+    return hmac.new(subchave, bytes(dados), hashlib.sha256).hexdigest()
 
 
 class Cofre:

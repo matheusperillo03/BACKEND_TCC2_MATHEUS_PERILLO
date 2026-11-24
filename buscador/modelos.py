@@ -121,6 +121,10 @@ class Entidade(Base):
     identificador: Mapped[str] = mapped_column(String(100), default="")
     atributos: Mapped[dict] = mapped_column(JSON, default=dict)
     captura_id: Mapped[str] = mapped_column(ForeignKey("capturas.id"))
+    # Candidato (TSE): resumo do título eleitoral com a CHAVE_IDENTIFICADORES, que reconhece a
+    # mesma pessoa entre eleições (decisão do autor, 23/11/2026). Fica fora de ``atributos`` de
+    # propósito: nenhuma rota, relatório ou exportação devolve esta coluna.
+    chave_pessoa: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
     fontes: Mapped[list[EntidadeFonte]] = relationship(
         back_populates="entidade", cascade="all, delete-orphan", order_by="EntidadeFonte.id"
@@ -159,7 +163,9 @@ class Aresta(Base):
 
 
 class Sugestao(Base):
-    """Sugestão de resolução (homônimos): nunca funde automaticamente."""
+    """Sugestão de resolução (homônimos; candidato x sócio ou servidor): nunca funde
+    automaticamente. O investigador confirma ou descarta o par (``situacao``), com justificativa;
+    a decisão vale para os dois sentidos do par e não funde as entidades."""
 
     __tablename__ = "sugestoes"
     __table_args__ = (UniqueConstraint("entidade_id", "candidata_id", name="uq_sugestao"),)
@@ -171,6 +177,11 @@ class Sugestao(Base):
     score: Mapped[float] = mapped_column(Float)
     motivo: Mapped[str] = mapped_column(Text)
     criado_em: Mapped[str] = mapped_column(String(40), default=iso_utc)
+    # pendente | confirmado | descartado (os mesmos valores da decisão de alerta, RF12).
+    situacao: Mapped[str] = mapped_column(String(12), default="pendente", server_default="pendente")
+    decidido_por: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    decidido_em: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    justificativa_decisao: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Alerta(Base):

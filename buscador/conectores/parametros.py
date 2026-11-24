@@ -114,6 +114,19 @@ class ParametrosTseArquivo(_Parametros):
     do_caso: bool = False
 
 
+class ParametrosTseBens(_Parametros):
+    """Bens declarados (``bem_candidato_*.csv``): como ``ParametrosTseArquivo``, sem
+    ``municipio`` (o arquivo de bens não traz o nome da unidade eleitoral)."""
+
+    diretorio: TextoLinha = Field(min_length=1, max_length=500)
+    ano: str = Field(default="", pattern=r"^(\d{4})?$")
+    uf: str = Field(default="", pattern=r"^([A-Za-z]{2})?$")
+    candidatos: Annotated[list[SqCandidato], BeforeValidator(_lista)] = Field(
+        default_factory=list, max_length=2000
+    )
+    do_caso: bool = False
+
+
 class ParametrosEditalArquivo(_Parametros):
     """``diretorio`` é relativo à raiz ``EDITAIS_DIR_BASE``."""
 
@@ -128,6 +141,7 @@ MODELOS = {
     "portal_transparencia": ParametrosPortalTransparencia,
     "pncp_termos": ParametrosPncpTermos,
     "tse_arquivo": ParametrosTseArquivo,
+    "tse_bens": ParametrosTseBens,
     "edital_arquivo": ParametrosEditalArquivo,
 }
 

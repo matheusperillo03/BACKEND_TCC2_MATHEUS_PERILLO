@@ -76,6 +76,13 @@ _CAMPO_DE_DOCUMENTO = re.compile(
 _CAMPO_ISENTO = re.compile(r"^(sqcandidato|candidatos)$")
 
 
+# Título eleitoral do candidato (TSE, ``NR_TITULO_ELEITORAL_CANDIDATO``): só o resumo com chave é
+# guardado (decisão do autor, 23/11/2026); fora da carga bruta, o número nunca é exibido.
+_CAMPO_DE_TITULO = re.compile(r"tituloeleitoral")
+COLUNA_TITULO = "NR_TITULO_ELEITORAL_CANDIDATO"
+_DOZE_DIGITOS = re.compile(r"(?<![0-9A-Za-z_])\d{12}(?![0-9A-Za-z_])")
+
+
 def _nome_plano(nome: object) -> str:
     return re.sub(r"[^a-z]", "", str(nome).lower())
 
@@ -106,12 +113,38 @@ def descaracterizar_texto(texto: str, *, contexto_cpf: bool = False) -> str:
     return _CANDIDATO.sub(trocar, texto)
 
 
+def ocultar_titulo_em_csv(texto: str) -> str:
+    """O texto de um CSV de candidatos do TSE com a coluna do título eleitoral trocada por
+    asteriscos (mesmo comprimento). Texto sem essa coluna no cabeçalho volta como veio.
+
+    Os campos do TSE vêm "entre aspas e separados por ponto e vírgula"; a linha é cortada por
+    ``";"``. Numa linha que não tenha o mesmo número de campos do cabeçalho (campo com quebra de
+    linha), todo número de 12 dígitos isolado é ocultado: o erro escolhido é esconder a mais."""
+    fim = texto.find("\n")
+    cabecalho = texto if fim < 0 else texto[:fim]
+    if COLUNA_TITULO not in cabecalho.upper():
+        return texto
+    nomes = [c.strip().strip('"').strip().upper() for c in cabecalho.lstrip("\ufeff").split(";")]
+    indice = nomes.index(COLUNA_TITULO) if COLUNA_TITULO in nomes else -1
+    linhas = texto.split("\n")
+    for i in range(1, len(linhas)):
+        campos = linhas[i].split(";")
+        if indice >= 0 and len(campos) == len(nomes):
+            campos[indice] = re.sub(r"\d", "*", campos[indice])
+            linhas[i] = ";".join(campos)
+        else:
+            linhas[i] = _DOZE_DIGITOS.sub("*" * 12, linhas[i])
+    return "\n".join(linhas)
+
+
 def descaracterizar(valor: object, *, campo: object = "", contexto_cpf: bool = False) -> object:
     """Cópia de um valor JSON (texto, lista, dicionário) com todo CPF descaracterizado. O nome do
     campo vale como contexto para o que está dentro dele. Números, booleanos e ``None`` não mudam
     (um CPF nunca é guardado como número: perderia os zeros à esquerda)."""
     if _CAMPO_ISENTO.fullmatch(_nome_plano(campo)):
         return valor
+    if isinstance(valor, str) and _CAMPO_DE_TITULO.search(_nome_plano(campo)):
+        return re.sub(r"\d", "*", valor)
     contexto = contexto_cpf or campo_de_documento(campo)
     if isinstance(valor, str):
         return descaracterizar_texto(valor, contexto_cpf=contexto)

@@ -304,8 +304,13 @@ class RegistroServidor:
 
 @dataclass
 class RegistroCandidato:
-    """Candidato (TSE). O CPF do candidato não é lido nem guardado: o vínculo com as doações é
-    feito por ``SQ_CANDIDATO`` (o CPF não é divulgado a partir de 2024)."""
+    """Candidato (TSE). O vínculo com as doações, os bens e as despesas é feito por
+    ``SQ_CANDIDATO``, que vale para uma eleição.
+
+    Decisão do autor de 23/11/2026, opção (a): o CPF do candidato só existe aqui reduzido aos
+    seis dígitos centrais (``cpf_parcial``, ``***NNNNNN**``; o conector descarta o resto na
+    leitura), e o título eleitoral só como resumo com chave (``titulo_resumo``), que reconhece o
+    mesmo candidato entre eleições. Nem o CPF inteiro nem o título em claro saem do conector."""
 
     captura_id: str
     ano: str
@@ -320,6 +325,43 @@ class RegistroCandidato:
     situacao_turno: str = ""
     # Só o arquivo de candidatos traz a situação da totalização; o de receitas não.
     origem: str = "consulta_cand"
+    cpf_parcial: str = ""  # ***NNNNNN** ou vazio (não divulgado)
+    titulo_resumo: str = ""  # HMAC-SHA256 em hexadecimal, ou vazio
+
+
+@dataclass
+class RegistroBem:
+    """Bem declarado ao TSE pelo candidato (arquivo ``bem_candidato``). O valor é o informado
+    pelo próprio candidato. O arquivo não traz CPF nem título: a chave é ``SQ_CANDIDATO``."""
+
+    captura_id: str
+    ano: str
+    sq_candidato: str
+    ordem: str  # NR_ORDEM_BEM_CANDIDATO
+    tipo: str = ""  # DS_TIPO_BEM_CANDIDATO
+    codigo_tipo: str = ""
+    descricao: str = ""
+    valor: float | None = None
+    atualizado_em: str = ""  # AAAA-MM-DD
+
+
+@dataclass
+class RegistroDespesa:
+    """Despesa contratada de campanha (TSE) com fornecedor pessoa jurídica: candidato -> empresa.
+    O CNAE é o que a prestação de contas informa para o fornecedor."""
+
+    captura_id: str
+    ano: str
+    sq_candidato: str
+    nome_candidato: str
+    cnpj_fornecedor: str
+    nome_fornecedor: str
+    cnae: str = ""
+    cnae_descricao: str = ""
+    valor: float | None = None
+    data: str = ""  # AAAA-MM-DD
+    descricao: str = ""
+    chave: str = ""  # SQ_DESPESA ou, na falta, resumo da linha
 
 
 @dataclass
@@ -370,6 +412,8 @@ Registro = (
     | RegistroSimples
     | RegistroExpulsao
     | RegistroConvenio
+    | RegistroBem
+    | RegistroDespesa
 )
 
 

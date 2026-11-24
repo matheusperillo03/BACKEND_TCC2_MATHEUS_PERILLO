@@ -29,6 +29,7 @@ from datetime import date, timedelta
 
 from buscador.modelos import Aresta, Entidade
 from buscador.resolucao.normalizacao import normalizar_nome
+from buscador.seguranca import numero_finito
 from buscador.tipologias import legislacao
 from buscador.tipologias.horizonte2 import (
     AVISO_COINCIDENCIA,
@@ -36,6 +37,8 @@ from buscador.tipologias.horizonte2 import (
     _arestas,
     _atr,
     _coincide,
+    _contratos_por_par,
+    _ente_coincide,
     _identidade_parcial,
     _lista,
     _valor_contratado,
@@ -48,6 +51,7 @@ from buscador.tipologias.motor import (
     _captura_do_atributo,
     _codigo_situacao,
     _data,
+    _estabelecimento_matriz,
     _por_item,
     formatar_data,
     formatar_moeda,
@@ -109,6 +113,15 @@ SOCIO_PJ, SOCIO_PF, SOCIO_ESTRANGEIRO = "1", "2", "3"
 # Teto de níveis percorridos na L4 (proteção contra cadeias anômalas; ciclos são cortados antes).
 L4_MAX_NIVEIS = 20
 
+# L9 (decisão do autor): o mandato é contado de 1º de janeiro do ano seguinte ao da eleição e dura
+# este número de anos. É uma aproximação: a data de posse varia com o cargo e o mandato de
+# senador é de oito anos; nenhum dos dois é tratado à parte.
+L9_ANOS_MANDATO = 4
+
+# L13: tamanho de um código de subclasse da CNAE (7 dígitos) e do menor prefixo aceito na lista
+# de atividades típicas de campanha (2 dígitos, a divisão).
+CNAE_DIGITOS, CNAE_PREFIXO_MINIMO = 7, 2
+
 AVISO_PESSOA_PROVAVEL = (
     "É PESSOA PROVÁVEL, não identificada: o CPF nos dados abertos do CNPJ é descaracterizado, "
     "então a regra só pôde comparar os seis dígitos visíveis e o nome normalizado. Homônimos com "
@@ -129,6 +142,9 @@ def parametros_padrao() -> dict:
         "l4_minimo_niveis": 2,
         "l7_dias_apos_abertura": 30,
         "l7_meses_antes_contrato": 12,
+        "l9_anos_mandato": L9_ANOS_MANDATO,
+        "l13_dias_abertura": 180,
+        "l13_cnaes_campanha": [],
         "l14_valor_minimo": 100_000.0,
         "l14_faixas_atipicas": list(FAIXAS_ATIPICAS),
         "l15_minimo_cnaes": 20,
@@ -152,6 +168,24 @@ def lista_de_codigos(texto: str, nome: str, tamanho: int = 0) -> list[str]:
         codigos.append(item.zfill(tamanho))
     if not codigos:
         raise ValueError(f"{nome} não pode ficar vazio.")
+    return sorted(set(codigos))
+
+
+def lista_de_cnaes(texto: str, nome: str) -> list[str]:
+    """CNAEs separados por vírgula (configuração): o código de sete dígitos ou um prefixo de
+    dois a seis (divisão, grupo, classe). A pontuação usual (``1813-0/01``) é aceita. A lista
+    pode ficar vazia: é o critério desligado."""
+    codigos = []
+    for item in (texto or "").split(","):
+        item = "".join(c for c in item if c not in " .-/")
+        if not item:
+            continue
+        if not item.isdigit() or not CNAE_PREFIXO_MINIMO <= len(item) <= CNAE_DIGITOS:
+            raise ValueError(
+                f"{nome}: '{item[:20]}' não é um CNAE (de {CNAE_PREFIXO_MINIMO} a "
+                f"{CNAE_DIGITOS} dígitos)."
+            )
+        codigos.append(item)
     return sorted(set(codigos))
 
 
@@ -694,8 +728,8 @@ def tipologia_l7(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 #
 # COAF, Casos e Casos (edição ANR 2021), tipologia 2.7: "Empresas recém-criadas, sem empregados
 # registrados, cujos sócios têm vínculos públicos". Composição da T1 com a T7: não cria coleta.
-# O trecho "sem empregados" NÃO é verificável (o dado aberto do CNPJ não tem o campo). A parte
-# com eleito ou PEP (L9) depende de decisão do orientador e não entra.
+# O trecho "sem empregados" NÃO é verificável (o dado aberto do CNPJ não tem o campo). A
+# composição com a L9 (eleito) não foi feita: a L8 continua sendo só T1 com T7.
 
 
 def tipologia_l8(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
@@ -761,6 +795,394 @@ def tipologia_l8(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
         )
 
     return _por_item("L8", sorted(set(recentes) & set(coincidencias)), regra)
+
+
+# ---- L9: eleito possivelmente sócio de empresa contratada pelo próprio ente (H46) ----------------
+#
+# FATF (2011), Laundering the Proceeds of Corruption, § 44 ("Self-dealing occurs when a PEP has a
+# financial interest in an entity which does business with the state"); Velasco et al. (2021),
+# seção 3.3. Decisão do autor de 23/11/2026, opção (a): o candidato e o sócio só são ligados por
+# uma SUGESTÃO (seis dígitos visíveis do CPF e nome normalizado iguais), que o investigador
+# confirma ou descarta; os registros nunca são fundidos.
+#
+# Regra: candidato eleito (as mesmas situações da T9) + sugestão candidato x sócio não descartada
+# + contrato da empresa do sócio, assinado durante o mandato, com órgão do mesmo ente (o mesmo
+# critério territorial da T9: UF, município e esfera do órgão no PNCP contra a unidade eleitoral
+# do candidato). Fora da regra: PEP (não há coleta da rota ``/peps`` do Portal) e eleito sem CPF
+# divulgado (sem os seis dígitos não há sugestão).
+
+_ESFERAS_COM_UF = ("E", "D", "M")
+
+
+def _pares_candidato_socio(ctx: Contexto) -> dict[tuple[str, str], tuple[str, str]]:
+    """(candidato, pessoa) -> (situação do par, id da sugestão), sem os pares descartados. A
+    sugestão existe nos dois sentidos; um sentido descartado descarta o par."""
+    situacoes: dict[tuple[str, str], set[str]] = {}
+    ids: dict[tuple[str, str], str] = {}
+    for sugestao in ctx.sugestoes:
+        a = ctx.entidades.get(sugestao.entidade_id)
+        b = ctx.entidades.get(sugestao.candidata_id)
+        if a is None or b is None or {a.tipo, b.tipo} != {"candidato", "pessoa"}:
+            continue
+        par = (a.id, b.id) if a.tipo == "candidato" else (b.id, a.id)
+        situacoes.setdefault(par, set()).add(sugestao.situacao or "pendente")
+        if a.tipo == "candidato" or par not in ids:
+            ids[par] = sugestao.id
+    return {
+        par: ("confirmado" if "confirmado" in marcas else "pendente", ids[par])
+        for par, marcas in situacoes.items()
+        if "descartado" not in marcas
+    }
+
+
+def _ente_indefinido(orgao: Entidade) -> bool:
+    """O órgão não tem o que a regra do ente precisa: a esfera, ou a UF de órgão não federal."""
+    esfera = str(_atr(orgao).get("esfera") or "").upper()
+    if not esfera:
+        return True
+    return esfera in _ESFERAS_COM_UF and not normalizar_nome(_atr(orgao).get("uf"))
+
+
+def tipologia_l9(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
+    eleito = {normalizar_nome(s) for s in parametros["t9_situacoes_eleito"]}
+    anos = int(parametros["l9_anos_mandato"])
+    eleitos = [
+        e
+        for e in ctx.entidades.values()
+        if e.tipo == "candidato" and normalizar_nome(_atr(e).get("situacao_turno")) in eleito
+    ]
+    sem_cpf = sum(1 for e in eleitos if not _atr(e).get("cpf_mascarado"))
+    if sem_cpf:
+        ctx.avisos.append(
+            f"L9: {sem_cpf} candidato(s) eleito(s) sem CPF divulgado no arquivo do TSE: sem os "
+            "seis dígitos não há sugestão de ligação com sócio, e a regra não os avalia."
+        )
+    empresas_do_socio: dict[str, list[tuple[Entidade, Aresta]]] = {}
+    for a in _arestas(ctx, "socio_de"):
+        empresa = ctx.entidades.get(a.destino_id)
+        if empresa is not None and empresa.tipo == "empresa":
+            empresas_do_socio.setdefault(a.origem_id, []).append((empresa, a))
+    contratos_por_par = _contratos_por_par(ctx)
+    orgaos_por_empresa: dict[str, set[str]] = {}
+    for empresa_id, orgao_id in contratos_por_par:
+        orgaos_por_empresa.setdefault(empresa_id, set()).add(orgao_id)
+
+    # (candidato, sócio, empresa, órgão) -> o que a regra usou.
+    grupos: dict[tuple[str, str, str, str], dict] = {}
+    for (candidato_id, socio_id), (situacao, sugestao_id) in _pares_candidato_socio(ctx).items():
+        candidato = ctx.entidades[candidato_id]
+        ano = str(_atr(candidato).get("ano") or "")
+        if normalizar_nome(_atr(candidato).get("situacao_turno")) not in eleito:
+            continue
+        if not ano.isdigit():
+            continue
+        inicio = date(int(ano) + 1, 1, 1)
+        fim = date(int(ano) + anos, 12, 31)
+        for empresa, aresta in empresas_do_socio.get(socio_id, []):
+            for orgao_id in sorted(orgaos_por_empresa.get(empresa.id, ())):
+                orgao = ctx.entidades.get(orgao_id)
+                if orgao is None:
+                    continue
+                no_mandato = [
+                    c
+                    for c in contratos_por_par[(empresa.id, orgao_id)]
+                    if (assinatura := _data(_atr(c).get("data_assinatura"))) is not None
+                    and inicio <= assinatura <= fim
+                ]
+                if not no_mandato:
+                    continue
+                ente = _ente_coincide(candidato, orgao)
+                if ente is None:
+                    if _ente_indefinido(orgao):
+                        ctx.avisos.append(
+                            f"L9 não avaliada para o órgão {orgao.identificador or orgao.rotulo}: "
+                            "o cadastro coletado não traz a UF ou a esfera, e sem elas não dá "
+                            "para dizer se é o ente do candidato eleito."
+                        )
+                    continue
+                grupos[(candidato_id, socio_id, empresa.id, orgao_id)] = {
+                    "contratos": sorted(no_mandato, key=lambda c: c.identificador),
+                    "aresta": aresta,
+                    "ente": ente,
+                    "situacao": situacao,
+                    "sugestao_id": sugestao_id,
+                    "inicio": inicio,
+                    "fim": fim,
+                }
+
+    def regra(item: tuple[tuple[str, str, str, str], dict]) -> AlertaDetectado:
+        (candidato_id, socio_id, empresa_id, orgao_id), grupo = item
+        candidato, socio = ctx.entidades[candidato_id], ctx.entidades[socio_id]
+        empresa, orgao = ctx.entidades[empresa_id], ctx.entidades[orgao_id]
+        c = _atr(candidato)
+        cpf, nome = _identidade_parcial(socio)
+        contratos = grupo["contratos"]
+        total = sum(_valor_contratado(k)[0] or 0 for k in contratos)
+        inicio, fim = grupo["inicio"].isoformat(), grupo["fim"].isoformat()
+        confirmada = grupo["situacao"] == "confirmado"
+        ligacao = (
+            "A ligação entre o candidato e o sócio foi confirmada pelo investigador na sugestão "
+            "de resolução"
+            if confirmada
+            else "A ligação entre o candidato e o sócio é uma sugestão pendente: ainda não foi "
+            "confirmada nem descartada pelo investigador"
+        )
+        contratos_texto = _lista(
+            [
+                f"{k.identificador} ({formatar_moeda(_valor_contratado(k)[0])}, assinado em "
+                f"{formatar_data(_atr(k).get('data_assinatura'))})"
+                for k in contratos
+            ]
+        )
+        motivo = (
+            f"Possível coincidência entre eleito e sócio: {candidato.rotulo} (candidato a "
+            f"{c.get('cargo') or 'cargo não informado'} em {c.get('ano')}, "
+            f"{c.get('nm_ue') or c.get('sg_ue') or ''}/{c.get('uf') or ''}, situação "
+            f"'{c.get('situacao_turno')}') e um sócio de {empresa.rotulo} (CNPJ básico "
+            f"{empresa.identificador}) têm o mesmo nome normalizado ('{nome}') e os mesmos seis "
+            f"dígitos visíveis do CPF ({cpf}). No período tratado como mandato, de "
+            f"{formatar_data(inicio)} a {formatar_data(fim)} ({anos} anos a partir de 1º de "
+            f"janeiro do ano seguinte ao da eleição), a empresa assinou {len(contratos)} "
+            f"contrato(s) com {orgao.rotulo}, órgão do mesmo ente do eleito ({grupo['ente']}): "
+            f"{contratos_texto}. {ligacao}. Seis dígitos e o nome não identificam uma pessoa: os "
+            "dois registros continuam separados (não foram fundidos) e a confirmação exige "
+            "fonte com o CPF completo. Indício a verificar: o vínculo com o ente é territorial "
+            "(unidade eleitoral do candidato e localização e esfera do órgão), o período do "
+            "mandato é aproximado e nada disso prova que o eleito tenha influído na contratação."
+        )
+        evidencias = [
+            ctx.evidencia(
+                _captura_do_atributo(ctx, candidato, "situacao_turno", "consulta_cand"),
+                f"Candidato {candidato.rotulo} ({c.get('cpf_mascarado')}): {c.get('cargo')} em "
+                f"{c.get('ano')}, situação '{c.get('situacao_turno')}' (TSE, candidatos)",
+            ),
+            ctx.evidencia(
+                grupo["aresta"].captura_id,
+                f"Sócio {socio.rotulo} ({cpf}) de {empresa.rotulo} (dados abertos do CNPJ, Sócios)",
+            ),
+        ] + [
+            ctx.evidencia(
+                k.captura_id,
+                f"Contrato {k.identificador} de {empresa.rotulo} com {orgao.rotulo}, assinado em "
+                f"{formatar_data(_atr(k).get('data_assinatura'))} (PNCP)",
+            )
+            for k in contratos[:MAX_ITENS_NO_MOTIVO]
+        ]
+        return AlertaDetectado(
+            tipologia="L9",
+            titulo=(
+                f"Possível coincidência: eleito {candidato.rotulo} e sócio de {empresa.rotulo}, "
+                f"contratada por {orgao.rotulo} durante o mandato"
+            ),
+            motivo=motivo,
+            entidades=[candidato_id, socio_id, empresa_id, orgao_id] + [k.id for k in contratos],
+            evidencias=evidencias,
+            discriminador="|".join(item[0]),
+            parametros={
+                "l9_anos_mandato": anos,
+                "mandato_inicio": inicio,
+                "mandato_fim": fim,
+                "sugestao_id": grupo["sugestao_id"],
+                "sugestao_situacao": grupo["situacao"],
+                "identidade_confirmada": False,
+                "cpf_descaracterizado": cpf,
+                "contratos": len(contratos),
+                "valor_contratado": round(total, 2),
+                "ente": grupo["ente"],
+                "situacao_candidato": c.get("situacao_turno"),
+                "ano_eleicao": c.get("ano"),
+            },
+        )
+
+    return _por_item("L9", sorted(grupos.items(), key=lambda g: g[0]), regra)
+
+
+# ---- L13: despesa de campanha com fornecedor de perfil incompatível (H52) -----------------------
+#
+# Carta Circular BCB nº 4.001/2020, XIV, d ("transferências, a partir das contas de
+# candidatos, para pessoas naturais ou jurídicas cuja atividade não guarde aparente relação com
+# contas de campanha"). É o fluxo inverso da T9: candidato -> empresa, pela aresta
+# ``despesa_de_campanha`` (despesas contratadas do TSE, só fornecedor com CNPJ).
+#
+# Dois critérios, um basta (limiares e lista: decisão do autor):
+# (a) o fornecedor iniciou a atividade menos de ``l13_dias_abertura`` dias antes da despesa (o
+#     mesmo cálculo da T1, com limiar próprio);
+# (b) o CNAE do fornecedor está fora da lista ``l13_cnaes_campanha``. A lista vem VAZIA por padrão
+#     e, vazia, o critério fica desligado: quais atividades são "típicas de campanha" é decisão do
+#     autor ainda não tomada. Usa o CNAE principal do cadastro do CNPJ quando a empresa foi
+#     coletada; senão, o que a prestação de contas informa.
+# Fora da regra: os "sinais de fachada" da ficha (fornecedor que dispara a L1 ou a L6).
+
+
+def _valor(aresta: Aresta) -> float:
+    return numero_finito((aresta.atributos or {}).get("valor")) or 0.0
+
+
+def tipologia_l13(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
+    limite = int(parametros["l13_dias_abertura"])
+    tipicos = sorted({str(c) for c in parametros["l13_cnaes_campanha"]})
+    grupos: dict[tuple[str, str], list[Aresta]] = {}
+    for a in _arestas(ctx, "despesa_de_campanha"):
+        candidato, empresa = ctx.entidades.get(a.origem_id), ctx.entidades.get(a.destino_id)
+        if candidato is not None and empresa is not None and empresa.tipo == "empresa":
+            grupos.setdefault((candidato.id, empresa.id), []).append(a)
+    if not grupos:
+        return []
+    if not tipicos:
+        ctx.avisos.append(
+            "L13: o critério do CNAE está desligado, porque a lista de atividades típicas de "
+            "campanha (L13_CNAES_CAMPANHA) está vazia; defini-la é decisão do autor ainda não "
+            "tomada. Só a abertura recente do fornecedor foi avaliada."
+        )
+    sem_cadastro: set[str] = set()
+    faltas = {"sem_data": 0, "sem_cnae": 0}
+
+    def regra(item: tuple[tuple[str, str], list[Aresta]]) -> AlertaDetectado | None:
+        (candidato_id, empresa_id), despesas = item
+        candidato, empresa = ctx.entidades[candidato_id], ctx.entidades[empresa_id]
+        despesas = sorted(despesas, key=lambda a: ((a.atributos or {}).get("data") or "", a.id))
+        inicio = _inicio(empresa)
+        if inicio is None:
+            sem_cadastro.add(empresa_id)
+        cnae_cadastro = str(_atr(empresa).get("cnae_fiscal_principal") or "").strip()
+        origem_cnae = "cadastro_cnpj" if cnae_cadastro else "prestacao_de_contas"
+        marcadas: list[tuple[Aresta, int | None, str]] = []  # (despesa, dias, CNAE fora)
+        for a in despesas:
+            atributos = a.atributos or {}
+            dia = _data(atributos.get("data"))
+            dias = (dia - inicio).days if inicio is not None and dia is not None else None
+            if inicio is not None and dia is None:
+                faltas["sem_data"] += 1
+            fora = ""
+            if tipicos:
+                cnae = cnae_cadastro or str(atributos.get("cnae_fornecedor") or "").strip()
+                if not cnae:
+                    faltas["sem_cnae"] += 1
+                elif not any(cnae.startswith(prefixo) for prefixo in tipicos):
+                    fora = cnae
+            recente = dias if dias is not None and dias < limite else None
+            if recente is not None or fora:
+                marcadas.append((a, recente, fora))
+        if not marcadas:
+            return None
+        recentes = [dias for _, dias, _ in marcadas if dias is not None]
+        cnaes_fora = sorted({fora for _, _, fora in marcadas if fora})
+        sinais = sorted(
+            (["recem_aberta"] if recentes else []) + (["cnae_fora_da_lista"] if cnaes_fora else [])
+        )
+        total = sum(_valor(a) for a, _, _ in marcadas)
+        despesas_texto = _lista(
+            [
+                f"{formatar_moeda(_valor(a))} em {formatar_data((a.atributos or {}).get('data'))}"
+                for a, _, _ in marcadas
+            ]
+        )
+        partes = []
+        if recentes:
+            partes.append(
+                f"a empresa iniciou a atividade em {formatar_data(inicio.isoformat())}, e a "
+                f"despesa mais próxima da abertura foi contratada "
+                + (
+                    f"{min(recentes)} dias depois"
+                    if min(recentes) >= 0
+                    else f"{abs(min(recentes))} dias antes do início da atividade"
+                )
+                + f" (limiar configurado: {limite} dias)"
+            )
+        if cnaes_fora:
+            fonte_cnae = (
+                "CNAE principal do cadastro do CNPJ"
+                if cnae_cadastro
+                else "CNAE informado na prestação de contas, porque a empresa não foi coletada "
+                "no CNPJ"
+            )
+            partes.append(
+                f"a atividade do fornecedor ({fonte_cnae}: {', '.join(cnaes_fora)}) está fora "
+                f"da lista configurada de atividades típicas de campanha ({', '.join(tipicos)})"
+            )
+        motivo = (
+            f"A campanha de {candidato.rotulo} (eleição de {_atr(candidato).get('ano')}) "
+            f"contratou {len(marcadas)} despesa(s), no total de {formatar_moeda(total)}, com "
+            f"{empresa.rotulo} (CNPJ básico {empresa.identificador}): {despesas_texto}. "
+            f"Sinal(is): {'; '.join(partes)}. O CNAE declarado nem sempre reflete o serviço "
+            "prestado, e empresa nova pode fornecer de forma regular; os valores são os da "
+            "despesa contratada na prestação de contas ao TSE, não os pagos. " + AVISO_PISTA
+        )
+        evidencias = []
+        matriz = _estabelecimento_matriz(empresa)
+        if recentes and matriz is not None:
+            evidencias.append(
+                _evidencia_estabelecimento(
+                    ctx,
+                    empresa,
+                    matriz,
+                    f"data de início da atividade {formatar_data(inicio.isoformat())}",
+                )
+            )
+        if cnaes_fora and cnae_cadastro:
+            evidencias.append(
+                _evidencia_estabelecimento(
+                    ctx, empresa, matriz or {}, f"CNAE principal {cnae_cadastro}"
+                )
+            )
+        for a, _, fora in marcadas[:MAX_ITENS_NO_MOTIVO]:
+            atributos = a.atributos or {}
+            informado = (
+                f"; CNAE informado na prestação de contas: {fora}"
+                if fora and not cnae_cadastro
+                else ""
+            )
+            evidencias.append(
+                ctx.evidencia(
+                    a.captura_id,
+                    f"Despesa contratada de campanha: {candidato.rotulo} com {empresa.rotulo} "
+                    f"(CNPJ {atributos.get('cnpj_fornecedor') or empresa.identificador}), "
+                    f"{formatar_moeda(_valor(a))} em {formatar_data(atributos.get('data'))}"
+                    f"{informado} (TSE, prestação de contas)",
+                )
+            )
+        return AlertaDetectado(
+            tipologia="L13",
+            titulo=(
+                f"Despesa de campanha de {candidato.rotulo} com fornecedor de perfil "
+                f"incompatível: {empresa.rotulo}"
+            ),
+            motivo=motivo,
+            entidades=[candidato_id, empresa_id],
+            evidencias=evidencias,
+            parametros={
+                "l13_dias_abertura": limite,
+                "l13_cnaes_campanha": tipicos,
+                "sinais": sinais,
+                "total_despesas": round(total, 2),
+                "despesas": len(marcadas),
+                "despesas_do_par": len(despesas),
+                "menor_intervalo_dias": min(recentes) if recentes else None,
+                "data_inicio_atividade": inicio.isoformat() if inicio is not None else None,
+                "cnae_usado": ", ".join(cnaes_fora) if cnaes_fora else None,
+                "origem_do_cnae": origem_cnae if cnaes_fora else None,
+                "ano_eleicao": _atr(candidato).get("ano"),
+            },
+        )
+
+    alertas = _por_item("L13", sorted(grupos.items(), key=lambda g: g[0]), regra)
+    if sem_cadastro:
+        ctx.avisos.append(
+            f"L13: {len(sem_cadastro)} fornecedor(es) de campanha sem data de início de "
+            "atividade (empresa não coletada no CNPJ): o critério de abertura recente não foi "
+            "avaliado para eles."
+        )
+    if faltas["sem_data"]:
+        ctx.avisos.append(
+            f"L13: {faltas['sem_data']} despesa(s) sem data: o critério de abertura recente não "
+            "foi avaliado para elas."
+        )
+    if faltas["sem_cnae"]:
+        ctx.avisos.append(
+            f"L13: {faltas['sem_cnae']} despesa(s) sem CNAE do fornecedor (nem no cadastro do "
+            "CNPJ nem na prestação de contas): o critério do CNAE não foi avaliado para elas."
+        )
+    return alertas
 
 
 # ---- L10: vínculo com empresa sancionada -------------------------------------------------------
@@ -1637,7 +2059,9 @@ TIPOLOGIAS_LAVAGEM = {
     "L6": tipologia_l6,
     "L7": tipologia_l7,
     "L8": tipologia_l8,
+    "L9": tipologia_l9,
     "L10": tipologia_l10,
+    "L13": tipologia_l13,
     "L14": tipologia_l14,
     "L15": tipologia_l15,
     "L16": tipologia_l16,

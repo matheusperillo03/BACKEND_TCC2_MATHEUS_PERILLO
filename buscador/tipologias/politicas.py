@@ -272,6 +272,37 @@ POLITICAS: dict[str, Politica] = {
             "verificável com dado aberto."
         ),
     ),
+    # L9 (H46) e L13 (H52): severidade e política de erro são DECISÃO DO AUTOR, a partir do falso
+    # positivo esperado nas fichas (L9: baixo com os seis dígitos do CPF e o nome; L13: médio).
+    "L9": Politica(
+        nome="Eleito possivelmente sócio de empresa contratada pelo próprio ente no mandato",
+        severidade="alta",
+        prefere_evitar=EVITA_FALSO_POSITIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso positivo: exige candidato eleito, sugestão de ligação com o "
+            "sócio (mesmos seis dígitos visíveis do CPF e mesmo nome) que o investigador não "
+            "descartou, contrato assinado no período do mandato e órgão do mesmo ente. Ainda há "
+            "falso positivo: homônimo com os mesmos seis dígitos, e sócio que entrou na empresa "
+            "depois do contrato. Aceita falso negativo: eleito sem CPF divulgado (2024) e PEP "
+            "não são avaliados, o período do mandato é aproximado (não considera a data de "
+            "posse nem o mandato de oito anos de senador) e órgão sem UF ou esfera fica de fora."
+        ),
+    ),
+    "L13": Politica(
+        nome="Despesa de campanha com fornecedor de perfil incompatível",
+        severidade="media",
+        prefere_evitar=EVITA_FALSO_NEGATIVO,
+        grupo="lavagem",
+        politica_erro=(
+            "Prefere evitar falso negativo: basta um dos sinais (fornecedor aberto pouco antes "
+            "da despesa ou CNAE fora da lista de atividades típicas de campanha). Falso positivo "
+            "esperado: médio, porque o CNAE declarado nem sempre reflete o serviço prestado e "
+            "empresa nova pode fornecer de forma regular. Aceita falso negativo: com a lista de "
+            "CNAE vazia (padrão) só a abertura recente é avaliada; fornecedor pessoa física não "
+            "é lido; e os sinais de fachada do fornecedor (L1 e L6) não entram na regra."
+        ),
+    ),
     "L10": Politica(
         nome="Vínculo com empresa sancionada ou com pessoa expulsa da administração",
         severidade="media",

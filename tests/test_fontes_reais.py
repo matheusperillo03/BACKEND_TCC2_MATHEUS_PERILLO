@@ -176,7 +176,7 @@ def test_tse_le_o_ano_de_aa_eleicao_no_arquivo_de_receitas(tmp_path):
     resultado = ConectorTseArquivo(dir_base=tmp_path).coletar({"diretorio": "t"}, registrar)
     doacao = next(r for r in resultado.registros if isinstance(r, RegistroDoacao))
     assert (doacao.ano, doacao.valor, doacao.data) == ("2026", 1234.56, "2026-09-05")
-    assert ConectorTseArquivo.versao == "1.1.0"
+    assert ConectorTseArquivo.versao == "1.2.0"
 
 
 # ---- scripts/recortar_cnpj.py -------------------------------------------------------------------
