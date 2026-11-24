@@ -73,15 +73,18 @@ def test_rf14_sinais_fracos_pesam_menos_e_dois_deles_sozinhos_nao_disparam(cenar
     cenario.empresa("92700002", "SO SINAIS FRACOS SINTETICA LTDA", secundarias=secundarias)
     cenario.socio("92700002", "ADMIN IDOSO SINTETICO", "***818181**", faixa="9")
     cenario.contrato("92700002", "2026-06-01", 150_000.0)
-    alertas = cenario.alertas("L14", "L15", "COMB")
-    assert sorted(a.tipologia for a in alertas) == ["L14", "L15"]
+    # H49: os sinais fracos não geram alerta próprio, e os dois juntos não chegam ao peso mínimo.
+    assert cenario.alertas("L14", "L15", "COMB") == []
+    assert sorted(d.tipologia for d in cenario.sinais("L14", "L15")) == ["L14", "L15"]
     pesos = cenario.padrao["comb_pesos"]
     assert (pesos["L14"], pesos["L15"], pesos["T1"], pesos["L8"]) == (0.5, 0.5, 1.0, 0.0)
     # Com mais um sinal comum (L5, sócio estrangeiro), a soma chega a 2,0 e dispara.
     cenario.socio(
         "92700002", "FOREIGN SAMPLE HOLDINGS", "", identificador="3", pais="249", qualificacao="37"
     )
-    (comb,) = _combinacoes(cenario.alertas("L5", "L14", "L15", "COMB"))
+    alertas = cenario.alertas("L5", "COMB")
+    assert sorted(a.tipologia for a in alertas) == ["COMB", "L5"]
+    (comb,) = _combinacoes(alertas)
     assert (comb.parametros["tipologias_distintas"], comb.parametros["soma_pesos"]) == (3, 2.0)
     fracos = {c["tipologia"] for c in comb.parametros["componentes"] if c["sinal_fraco"]}
     assert fracos == {"L14", "L15"}
@@ -171,7 +174,11 @@ def test_rf14_combinacao_pela_api_no_catalogo_e_na_fila(cliente, caso_carregado)
     for comb in combinacoes:
         assert comb["grupo"] == "combinacao" and comb["situacao"] == "pendente"
         assert comb["politica_erro"].startswith("Prefere evitar falso positivo")
-        assert {c["alerta_id"] for c in comb["parametros"]["componentes"]} <= ids
+        componentes = comb["parametros"]["componentes"]
+        # H49: o sinal fraco não tem alerta próprio (``alerta_id`` nulo); os demais apontam para
+        # um alerta da fila.
+        assert {c["alerta_id"] for c in componentes if not c["sinal_fraco"]} <= ids
+        assert all(c["alerta_id"] is None for c in componentes if c["sinal_fraco"])
         assert comb["parametros"]["aviso"].startswith("Não é escore de culpa")
     # Executar só a combinação não apaga os demais; pedir um limiar fora da faixa dá 422.
     r = cliente.post(
