@@ -262,6 +262,8 @@ class Configuracao(BaseSettings):
     l1_minimo_estabelecimentos: int = Field(default=5, ge=2, le=10_000)
     l1_janela_abertura_dias: int = Field(default=180, ge=1, le=36_500)
     l1_minimo_abertas_na_janela: int = Field(default=3, ge=2, le=10_000)
+    # L2 (sinal fraco): empresas, em grupos sem sócio em comum, com o mesmo telefone ou e-mail.
+    l2_minimo_empresas: int = Field(default=3, ge=2, le=10_000)
     # L3 (mesmo administrador): empresas administradas e quantas abertas em N meses.
     l3_minimo_empresas: int = Field(default=5, ge=2, le=10_000)
     l3_minimo_abertas_na_janela: int = Field(default=3, ge=1, le=10_000)
@@ -636,6 +638,7 @@ class Configuracao(BaseSettings):
             "l1_minimo_estabelecimentos": self.l1_minimo_estabelecimentos,
             "l1_janela_abertura_dias": self.l1_janela_abertura_dias,
             "l1_minimo_abertas_na_janela": self.l1_minimo_abertas_na_janela,
+            "l2_minimo_empresas": self.l2_minimo_empresas,
             "l3_minimo_empresas": self.l3_minimo_empresas,
             "l3_minimo_abertas_na_janela": self.l3_minimo_abertas_na_janela,
             "l3_janela_meses": self.l3_janela_meses,

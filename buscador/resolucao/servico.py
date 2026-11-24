@@ -69,6 +69,7 @@ from buscador.conectores.base import (
 from buscador.modelos import Aresta, Entidade, EntidadeFonte, Sugestao
 from buscador.privacidade import descaracterizar_texto
 from buscador.resolucao.normalizacao import (
+    contatos,
     data_layout_para_iso,
     endereco_legivel,
     limpar_documento,
@@ -413,6 +414,11 @@ class Resolvedor:
             "nome_cidade_exterior": r.nome_cidade_exterior,
             "uf": r.uf,
             "municipio": r.municipio,
+            # Telefones e e-mail (L2): só a chave de comparação e a forma mascarada; o valor
+            # completo fica na captura (minimização, RNF04).
+            "contatos": contatos(
+                r.ddd_1, r.telefone_1, r.ddd_2, r.telefone_2, r.correio_eletronico
+            ),
             "captura_id": r.captura_id,
         }
         atributos = dict(empresa.atributos or {})

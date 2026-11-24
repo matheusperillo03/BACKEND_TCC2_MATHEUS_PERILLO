@@ -10,6 +10,9 @@ NÃO É ESCORE DE CULPA: é uma pista para priorizar a análise (RF12, RF14). Os
 as regras de contagem abaixo são DECISÃO DO AUTOR, até haver dados para calibrar:
 
 - só entram alertas ativos e não descartados pelo investigador, das tipologias T e L;
+- os sinais fracos (H49: L2, L14 e L15) não têm alerta próprio: são avaliados na mesma execução
+  e entram como componentes sem alerta (``alerta_id`` nulo, situação ``sinal``), com o motivo e
+  as evidências. Para tirar um sinal da conta, o operador dá peso zero a ele em ``COMB_PESOS``;
 - cada tipologia conta uma vez por entidade, com o seu peso (padrão 1; sinais fracos, 0,5);
 - tipologias que descrevem o mesmo fato contam uma vez (``FAMILIAS``: a L1 estende a T2);
 - uma composição não soma de novo o que já foi contado (``COMPOSICOES``: a L8 é T1 com T7), por
@@ -19,12 +22,14 @@ as regras de contagem abaixo são DECISÃO DO AUTOR, até haver dados para calib
 
 Diferente das demais, esta regra lê os ALERTAS do caso, e não as entidades: roda depois das
 outras, na mesma execução. Executar só uma tipologia não recalcula a combinação; decidir um
-alerta também não (vale na próxima execução).
+alerta também não (vale na próxima execução). Com os padrões, os três sinais fracos juntos somam
+1,5 e não disparam sozinhos: é preciso ao menos um alerta comum na mesma entidade.
 """
 
 from __future__ import annotations
 
 import json
+from dataclasses import asdict, dataclass
 
 from buscador.modelos import Alerta, Entidade
 from buscador.seguranca import numero_finito
@@ -34,6 +39,8 @@ from buscador.tipologias.motor import AlertaDetectado, Evidencia, formatar_numer
 CODIGO = "COMB"
 PESO_PADRAO = 1.0
 PESO_SINAL_FRACO = 0.5
+# Situação do componente que é sinal fraco (H49): não é alerta, então não tem decisão.
+SITUACAO_SINAL = "sinal"
 # Tipologias que descrevem o mesmo fato: contam como uma só na combinação.
 FAMILIAS = {"L1": "T2"}
 # Composições: o alerta existe porque os componentes existem; não soma de novo.
@@ -86,21 +93,76 @@ def parametros_padrao() -> dict:
     return {"comb_minimo_tipologias": 2, "comb_peso_minimo": 2.0, "comb_pesos": pesos_padrao()}
 
 
+@dataclass(frozen=True)
+class _Item:
+    """O que a combinação soma: um alerta gravado ou um sinal fraco (H49), que não tem alerta
+    próprio (``alerta_id`` nulo e situação ``sinal``) e por isso leva o motivo consigo."""
+
+    tipologia: str
+    titulo: str
+    severidade: str
+    situacao: str
+    alerta_id: str | None
+    entidades: tuple[str, ...]
+    evidencias: tuple[dict, ...]
+    motivo: str = ""
+
+
+def _itens(alertas: list[Alerta], sinais: list[AlertaDetectado]) -> list[_Item]:
+    itens = []
+    for alerta in alertas:
+        politica = politicas.politica(alerta.tipologia)
+        if alerta.tipologia == CODIGO or alerta.ativo is False or alerta.situacao == "descartado":
+            continue
+        if politica is not None and politica.sinal_fraco:
+            # Alerta de sinal fraco gravado por versão anterior: o sinal vem de ``sinais``.
+            continue
+        itens.append(
+            _Item(
+                tipologia=alerta.tipologia,
+                titulo=alerta.titulo,
+                severidade=alerta.severidade,
+                situacao=alerta.situacao or "pendente",
+                alerta_id=alerta.id,
+                entidades=tuple(alerta.entidades or ()),
+                evidencias=tuple(alerta.evidencias or ()),
+            )
+        )
+    for sinal in sinais:
+        itens.append(
+            _Item(
+                tipologia=sinal.tipologia,
+                titulo=sinal.titulo,
+                severidade=sinal.severidade,
+                situacao=SITUACAO_SINAL,
+                alerta_id=None,
+                entidades=tuple(sinal.entidades),
+                evidencias=tuple(asdict(e) for e in sinal.evidencias),
+                motivo=sinal.motivo,
+            )
+        )
+    return itens
+
+
 def detectar(
-    alertas: list[Alerta], entidades: dict[str, Entidade], parametros: dict
+    alertas: list[Alerta],
+    entidades: dict[str, Entidade],
+    parametros: dict,
+    sinais: list[AlertaDetectado] | None = None,
 ) -> list[AlertaDetectado]:
-    """Um alerta de combinação por empresa ou pessoa que reúne tipologias e peso suficientes."""
+    """Um alerta de combinação por empresa ou pessoa que reúne tipologias e peso suficientes.
+
+    ``sinais`` são os sinais fracos avaliados na mesma execução (H49): não têm alerta próprio e
+    só existem aqui, como componentes."""
     minimo = int(parametros["comb_minimo_tipologias"])
     peso_minimo = float(parametros["comb_peso_minimo"])
     tabela: dict = parametros["comb_pesos"]
-    por_entidade: dict[str, list[Alerta]] = {}
-    for alerta in alertas:
-        if alerta.tipologia == CODIGO or alerta.ativo is False or alerta.situacao == "descartado":
-            continue
-        for entidade_id in dict.fromkeys(alerta.entidades or []):
+    por_entidade: dict[str, list[_Item]] = {}
+    for item in _itens(alertas, sinais or []):
+        for entidade_id in dict.fromkeys(item.entidades):
             entidade = entidades.get(entidade_id)
             if entidade is not None and entidade.tipo in TIPOS_DE_ENTIDADE:
-                por_entidade.setdefault(entidade_id, []).append(alerta)
+                por_entidade.setdefault(entidade_id, []).append(item)
 
     detectados = []
     for entidade_id in sorted(por_entidade):
@@ -109,7 +171,7 @@ def detectar(
             por_entidade[entidade_id],
             key=lambda a: (
                 politicas.chave_ordenacao(a.severidade, a.tipologia, a.titulo),
-                a.id or "",
+                a.alerta_id or "",
             ),
         )
         presentes = {a.tipologia for a in do_alvo}
@@ -144,31 +206,38 @@ def detectar(
                 contadas_por[familia] = codigo
             componentes.append(
                 {
-                    "alerta_id": alerta.id,
+                    "alerta_id": alerta.alerta_id,
                     "tipologia": codigo,
                     "tipologia_nome": politica.nome if politica else codigo,
                     "titulo": alerta.titulo,
                     "severidade": alerta.severidade,
-                    "situacao": alerta.situacao or "pendente",
+                    "situacao": alerta.situacao,
                     "peso": peso if conta else 0.0,
                     "sinal_fraco": bool(politica.sinal_fraco) if politica else False,
                     "conta": conta,
                     "observacao": observacao,
+                    # Só o sinal fraco traz o motivo: ele não tem cartão próprio para abrir.
+                    "motivo": alerta.motivo,
                 }
             )
         soma = round(sum(contadas.values()), 2)
         if len(contadas) < minimo or soma < peso_minimo:
             continue
         lista = "; ".join(
-            f"[{c['tipologia']}] {c['titulo']} (peso {formatar_numero(c['peso'])})"
-            if c["conta"]
-            else f"[{c['tipologia']}] {c['titulo']} (não soma: {c['observacao']})"
+            f"[{c['tipologia']}] {c['titulo']} ("
+            + ("sinal fraco, sem alerta próprio; " if c["alerta_id"] is None else "")
+            + (
+                f"peso {formatar_numero(c['peso'])})"
+                if c["conta"]
+                else f"não soma: {c['observacao']})"
+            )
             for c in componentes
         )
         motivo = (
             f"{'A empresa' if entidade.tipo == 'empresa' else 'A pessoa'} {entidade.rotulo}"
             f"{' (' + entidade.identificador + ')' if entidade.identificador else ''} reúne "
-            f"{len(componentes)} alerta(s) de {len(contadas)} tipologias distintas, com soma de "
+            f"{len(componentes)} alerta(s) ou sinal(is) de {len(contadas)} tipologias distintas, "
+            "com soma de "
             f"pesos {formatar_numero(soma)}: {lista}. Os mínimos configurados são {minimo} "
             f"tipologias distintas e soma de pesos {formatar_numero(peso_minimo)}. Sinais que "
             "isolados pouco dizem pesam mais quando aparecem juntos na mesma entidade; alertas "
@@ -176,7 +245,7 @@ def detectar(
         )
         evidencias = []
         for alerta in do_alvo:
-            for evidencia in (alerta.evidencias or [])[:MAX_EVIDENCIAS_POR_COMPONENTE]:
+            for evidencia in alerta.evidencias[:MAX_EVIDENCIAS_POR_COMPONENTE]:
                 evidencias.append(
                     Evidencia(
                         descricao=f"[{alerta.tipologia}] {evidencia['descricao']}",

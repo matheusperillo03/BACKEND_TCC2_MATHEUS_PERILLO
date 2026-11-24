@@ -423,6 +423,7 @@ class ParametrosTipologias(BaseModel):
     l3_minimo_empresas: int | None = Field(default=None, ge=2, le=10_000)
     l3_minimo_abertas_na_janela: int | None = Field(default=None, ge=1, le=10_000)
     l3_janela_meses: int | None = Field(default=None, ge=1, le=1_200)
+    l2_minimo_empresas: int | None = Field(default=None, ge=2, le=10_000)
     l4_minimo_niveis: int | None = Field(default=None, ge=2, le=20)
     l7_dias_apos_abertura: int | None = Field(default=None, ge=0, le=36_500)
     l7_meses_antes_contrato: int | None = Field(default=None, ge=1, le=1_200)
@@ -437,7 +438,7 @@ class ParametrosTipologias(BaseModel):
 
 CodigoTipologia = Literal[
     "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10",
-    "L1", "L3", "L4", "L5", "L6", "L7", "L8", "L10", "L14", "L15", "L16",
+    "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L10", "L14", "L15", "L16",
     "COMB",
 ]  # fmt: skip
 
