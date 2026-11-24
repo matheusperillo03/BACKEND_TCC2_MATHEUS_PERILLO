@@ -99,8 +99,9 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
     "L1": (
         "H40",
         "Endereço normalizado, com complemento, em que N ou mais empresas têm estabelecimento "
-        "ATIVO, mesmo sem contrato público; marca se M ou mais iniciaram a atividade num "
-        "intervalo de D dias.",
+        "ATIVO (código 02), mesmo sem contrato público; marca se M ou mais iniciaram a atividade "
+        "num intervalo de D dias. Estabelecimento baixado, inapto, suspenso ou nulo não conta; o "
+        "que vem sem situação informada conta, com aviso no alerta.",
         _GAFI_EGMONT + ", itens 4 e 11; Velasco et al. (2021), seção 3.1. Limiares: decisão do "
         "autor.",
         ["cnpj_arquivo"],

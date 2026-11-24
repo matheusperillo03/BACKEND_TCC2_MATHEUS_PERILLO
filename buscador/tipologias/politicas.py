@@ -190,7 +190,9 @@ POLITICAS: dict[str, Politica] = {
         grupo="lavagem",
         politica_erro=(
             "Prefere evitar falso negativo: aponta todo endereço (com complemento) em que há "
-            "muitas empresas ativas, mesmo sem contrato público. O falso positivo é alto: centro "
+            "muitas empresas de estabelecimento ativo, mesmo sem contrato público. "
+            "Estabelecimento baixado, inapto, suspenso ou nulo não conta; o que vem sem situação "
+            "informada conta, com aviso no alerta. O falso positivo é alto: centro "
             "empresarial, escritório de contabilidade usado como domicílio fiscal, coworking e "
             "MEI registrado na residência. O dado aberto não diz se o endereço é residencial ou "
             "comercial."

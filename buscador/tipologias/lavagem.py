@@ -30,6 +30,12 @@ from datetime import date, timedelta
 from buscador.modelos import Aresta, Entidade
 from buscador.resolucao.normalizacao import normalizar_nome
 from buscador.seguranca import numero_finito
+from buscador.situacao_cadastral import (
+    conta_no_endereco,
+    enderecos_em_uso,
+    rotulo_situacao,
+    situacao_nao_informada,
+)
 from buscador.tipologias import legislacao
 from buscador.tipologias.horizonte2 import (
     AVISO_COINCIDENCIA,
@@ -45,11 +51,9 @@ from buscador.tipologias.horizonte2 import (
     tipologia_t7,
 )
 from buscador.tipologias.motor import (
-    SITUACAO_ATIVA,
     AlertaDetectado,
     Contexto,
     _captura_do_atributo,
-    _codigo_situacao,
     _data,
     _estabelecimento_matriz,
     _por_item,
@@ -305,7 +309,8 @@ def _evidencia_socio(ctx: Contexto, socio: Entidade, aresta: Aresta, empresa: En
 # GAFI/Egmont (2018), Anexo E, item 4 ("registered at an address that is also listed against
 # numerous other companies") e item 11 ("Address of mass registration"); Velasco et al. (2021),
 # seção 3.1 ("Common addresses"). Extensão da T2: não exige contrato, separa as salas pelo
-# complemento, conta só estabelecimento ATIVO e olha a concentração das aberturas.
+# complemento e olha a concentração das aberturas. Conta os mesmos estabelecimentos da T2
+# (``buscador.situacao_cadastral``): o ATIVO e o que veio sem situação informada, este com aviso.
 
 
 def tipologia_l1(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
@@ -315,13 +320,16 @@ def tipologia_l1(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
     grupos: dict[str, dict[str, tuple[Entidade, dict]]] = {}
     for empresa in _empresas(ctx):
         for est in _estabelecimentos(empresa):
-            # Sem situação informada não se sabe se o estabelecimento está ativo: fica de fora.
-            if _codigo_situacao(est.get("situacao_cadastral")) != SITUACAO_ATIVA:
+            if not conta_no_endereco(est):
                 continue
             chave = est.get("endereco_com_complemento") or est.get("endereco_normalizado")
-            if chave:
-                # Uma empresa conta uma vez por endereço (matriz e filial no mesmo lugar).
-                grupos.setdefault(chave, {}).setdefault(empresa.id, (empresa, est))
+            if not chave:
+                continue
+            # Uma empresa conta uma vez por endereço (matriz e filial no mesmo lugar). Se ela tem
+            # ali um estabelecimento ATIVO e outro sem situação, vale o ATIVO.
+            escolhido = grupos.setdefault(chave, {}).setdefault(empresa.id, (empresa, est))[1]
+            if situacao_nao_informada(escolhido) and not situacao_nao_informada(est):
+                grupos[chave][empresa.id] = (empresa, est)
 
     def regra(grupo: tuple[str, dict[str, tuple[Entidade, dict]]]) -> AlertaDetectado | None:
         chave, por_empresa = grupo
@@ -332,6 +340,7 @@ def tipologia_l1(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
         concentradas, inicio_janela = _maior_concentracao(datas, janela)
         concentrada = concentradas >= minimo_janela
         legivel = itens[0][1].get("endereco") or chave
+        sem_situacao = sum(situacao_nao_informada(est) for _, est in itens)
         nomes = _lista(
             [
                 f"{e.rotulo} (CNPJ {est.get('cnpj') or e.identificador}, início em "
@@ -346,9 +355,18 @@ def tipologia_l1(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
             else f"; não há {minimo_janela} aberturas num intervalo de {janela} dias"
         )
         motivo = (
-            f"O endereço '{legivel}' é o endereço de registro de {len(itens)} empresas com "
-            f"estabelecimento ATIVO no CNPJ ({nomes}){abertura}. O limiar configurado é de "
-            f"{minimo} empresas ativas no mesmo endereço, contado o complemento. Pode indicar "
+            f"O endereço '{legivel}' é o endereço de registro de {len(itens)} empresas "
+            f"({nomes}){abertura}. O limiar configurado é de {minimo} empresas no mesmo "
+            "endereço, contado o complemento. Só contam os estabelecimentos com situação "
+            "cadastral ATIVA (código 02); os baixados, inaptos, suspensos e nulos ficam de fora. "
+            + (
+                f"{sem_situacao} estabelecimento(s) deste endereço está(ão) com a situação "
+                "cadastral não informada na fonte e foi(ram) contado(s), porque não há como "
+                "saber se deixou(aram) de existir; convém conferir. "
+                if sem_situacao
+                else ""
+            )
+            + "Pode indicar "
             "domicílio de fachada ou endereço de registro em massa, mas também centro "
             "empresarial, escritório de contabilidade, coworking ou residência de "
             "microempreendedor: o dado aberto não diz o tipo do endereço. " + AVISO_PISTA
@@ -356,7 +374,8 @@ def tipologia_l1(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
         return AlertaDetectado(
             tipologia="L1",
             titulo=(
-                f"Endereço de registro de {len(itens)} empresas ativas"
+                # "ativas" só quando todas têm a situação ATIVA informada na fonte.
+                f"Endereço de registro de {len(itens)} empresas{'' if sem_situacao else ' ativas'}"
                 + (f", {concentradas} abertas em {janela} dias" if concentrada else "")
             ),
             motivo=motivo,
@@ -366,7 +385,7 @@ def tipologia_l1(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
                     ctx,
                     e,
                     est,
-                    f"endereço '{est.get('endereco')}', situação ATIVA, início em "
+                    f"endereço '{est.get('endereco')}', {rotulo_situacao(est)}, início em "
                     f"{formatar_data(est.get('data_inicio_atividade'))}",
                 )
                 for e, est in itens[: MAX_ITENS_NO_MOTIVO * 3]
@@ -376,7 +395,9 @@ def tipologia_l1(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
                 "l1_minimo_estabelecimentos": minimo,
                 "l1_janela_abertura_dias": janela,
                 "l1_minimo_abertas_na_janela": minimo_janela,
+                # O nome da chave vem de antes: inclui as empresas contadas sem situação informada.
                 "empresas_ativas_no_endereco": len(itens),
+                "estabelecimentos_sem_situacao": sem_situacao,
                 "abertas_na_janela": concentradas,
                 "abertura_concentrada": concentrada,
                 "endereco_normalizado": chave,
@@ -1262,6 +1283,9 @@ def _vinculos_com_sancionadas(ctx: Contexto, parametros: dict):
                 and _qualificacao(aresta) in administracao
             ):
                 administra.setdefault(socio.id, {})[empresa_id] = aresta
+    # Aqui o endereço NÃO passa pelo filtro de estabelecimento ativo (``situacao_cadastral``): a
+    # L10 procura a empresa usada no lugar da sancionada, e a sancionada pode estar baixada ou
+    # inapta. Tirar o estabelecimento não ativo esconderia justamente a sucessora.
     por_endereco: dict[str, set[str]] = {}
     for empresa in _empresas(ctx):
         for chave in _atr(empresa).get("enderecos_normalizados") or []:
@@ -2097,7 +2121,8 @@ def tipologia_l16(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 
         # (d) dirigente que também é sócio de empresa no mesmo endereço, do mesmo ramo ou
         # recém-aberta
-        enderecos = set(atributos.get("enderecos_normalizados") or [])
+        # Só estabelecimento ATIVO ou sem situação informada (mesmo critério da T2).
+        enderecos = enderecos_em_uso(atributos)
         ramo = str(atributos.get("cnae_fiscal_principal") or "").strip()
         primeira_vigencia = min(vigencias) if vigencias else None
         ligadas = []
@@ -2110,8 +2135,23 @@ def tipologia_l16(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
                 if outra is None or outra_id == entidade_id:
                     continue
                 motivos = []
-                if enderecos & set(_atr(outra).get("enderecos_normalizados") or []):
-                    motivos.append("mesmo endereço da entidade")
+                da_outra = enderecos_em_uso(_atr(outra))
+                comuns = sorted(set(enderecos) & set(da_outra))
+                if comuns:
+                    sem_situacao = sum(
+                        situacao_nao_informada(est)
+                        for chave in comuns
+                        for est in enderecos[chave] + da_outra[chave]
+                    )
+                    motivos.append(
+                        "mesmo endereço da entidade"
+                        + (
+                            f", contado(s) {sem_situacao} estabelecimento(s) com a situação "
+                            "cadastral não informada na fonte"
+                            if sem_situacao
+                            else ""
+                        )
+                    )
                 if ramo and ramo == str(_atr(outra).get("cnae_fiscal_principal") or "").strip():
                     motivos.append(f"mesmo CNAE principal ({ramo})")
                 abertura = _inicio(outra)
