@@ -16,7 +16,7 @@ from buscador.conectores.edital_arquivo import ConectorEditalArquivo
 from buscador.conectores.pncp import ConectorPncp
 from buscador.conectores.pncp_termos import ConectorPncpTermos
 from buscador.conectores.portal_transparencia import ConectorPortalTransparencia
-from buscador.conectores.tse_arquivo import ConectorTseArquivo
+from buscador.conectores.tse_arquivo import ConectorTseArquivo, ConectorTseBens
 from buscador.config import Configuracao
 
 FONTES = (
@@ -26,6 +26,7 @@ FONTES = (
     "pncp_termos",
     "tse_arquivo",
     "edital_arquivo",
+    "tse_bens",
 )
 
 
@@ -36,6 +37,7 @@ CONECTORES: dict[str, type[Conector]] = {
     "pncp_termos": ConectorPncpTermos,
     "tse_arquivo": ConectorTseArquivo,
     "edital_arquivo": ConectorEditalArquivo,
+    "tse_bens": ConectorTseBens,
 }
 
 
@@ -87,8 +89,11 @@ def criar_conector(fonte: str, config: Configuracao, **extras) -> Conector:
             max_bytes_pagina=config.pncp_max_bytes_pagina,
             **extras,
         )
-    if fonte == "tse_arquivo":
-        return ConectorTseArquivo(
+    if fonte in ("tse_arquivo", "tse_bens"):
+        return CONECTORES[fonte](
+            # O título eleitoral só é guardado como resumo com chave própria
+            # (CHAVE_IDENTIFICADORES; decisão de 23/11/2026). Sem a chave, o conector não é criado.
+            resumir_titulo=config.resumidor_de_titulo(),
             dir_base=config.tse_dir_base,
             max_bytes_arquivo=config.tse_max_bytes_arquivo,
             max_registros=config.tse_max_registros,
@@ -122,6 +127,7 @@ __all__ = [
     "ConectorPncpTermos",
     "ConectorPortalTransparencia",
     "ConectorTseArquivo",
+    "ConectorTseBens",
     "ControleTaxa",
     "ErroConector",
     "FalhaTransitoria",

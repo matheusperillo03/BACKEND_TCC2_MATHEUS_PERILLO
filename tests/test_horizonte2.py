@@ -229,7 +229,7 @@ def test_h19_todas_as_coletas_ficam_registradas_com_conector_e_versao(cliente_h2
         ("pncp", "1.4.0"),
         ("pncp_termos", "1.0.1"),
         ("portal_transparencia", "1.2.0"),
-        ("tse_arquivo", "1.1.0"),
+        ("tse_arquivo", "1.2.0"),
         ("edital_arquivo", "1.1.1"),
     }
     assert all(c["captura_ids"] and c["tentativas"] >= 1 for c in coletas)
@@ -446,14 +446,16 @@ def test_h19_tse_le_utf8_latin1_e_zip_com_o_mesmo_resultado(tmp_path):
     assert "NÃO ELEITO" in situacoes
 
 
-def test_h19_tse_ignora_recursos_proprios_e_nunca_le_o_cpf_do_candidato(tmp_path):
+def test_h19_tse_ignora_recursos_proprios_e_nunca_guarda_o_cpf_inteiro_do_candidato(tmp_path):
     shutil.copytree(H2 / "tse", tmp_path / "t")
     resultado = ConectorTseArquivo(dir_base=tmp_path).coletar({"diretorio": "t"}, _Registrador())
     doacoes = [r for r in resultado.registros if hasattr(r, "documento_doador")]
     assert len(doacoes) == 5 and all(d.origem_receita != "Recursos próprios" for d in doacoes)
     assert any("Recursos próprios" in a and "1 receita" in a for a in resultado.avisos)
     candidatos = [r for r in resultado.registros if hasattr(r, "situacao_turno")]
-    assert all(not hasattr(c, "cpf") for c in candidatos)
+    # Decisão de 23/11/2026: do CPF do candidato só existem os seis dígitos centrais (aqui o
+    # arquivo de 2024 traz "-4", então nem isso).
+    assert all(not hasattr(c, "cpf") and c.cpf_parcial == "" for c in candidatos)
     # Valores e datas no formato brasileiro.
     ricardo = next(d for d in doacoes if d.nome_doador == "RICARDO FICTICIO LIMA")
     assert (ricardo.valor, ricardo.data, ricardo.sq_candidato) == (

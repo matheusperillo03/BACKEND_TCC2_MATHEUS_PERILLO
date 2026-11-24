@@ -9,7 +9,7 @@ Todas as capturas da demonstração saem marcadas como sintéticas (``simulado:/
 ``metadados.simulado = true``): o PNCP por causa do transporte simulado, e o CNPJ por causa do
 arquivo-marcador ``SINTETICO.txt`` da pasta de fixtures. A raiz de ingestão do CNPJ é fixada em
 tests/fixtures só para este script. Exige as mesmas variáveis do serviço
-(``AUDITORIA_CHAVE_HMAC`` e ``CUSTODIA_CHAVE``).
+(``AUDITORIA_CHAVE_HMAC``, ``CUSTODIA_CHAVE`` e ``CHAVE_IDENTIFICADORES``).
 
 Quem "faz" a demonstração (H23): no modo de desenvolvimento (``MODO_DEV=1``), o primeiro token de
 ``TOKENS_DEV``. Fora dele, um usuário real que já exista, indicado em ``DEMO_USUARIO`` (crie-o com

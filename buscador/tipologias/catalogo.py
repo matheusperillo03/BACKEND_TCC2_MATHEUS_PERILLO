@@ -172,6 +172,20 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
         ["cnpj_arquivo", "pncp", "portal_transparencia (servidores)"],
         ["t1_dias_minimos"],
     ),
+    "L9": (
+        "H46",
+        "Candidato eleito ligado a um sócio por sugestão de resolução não descartada (mesmos "
+        "seis dígitos visíveis do CPF e mesmo nome normalizado; pendente ou confirmada pelo "
+        "investigador, sem fusão), cuja empresa assinou contrato, durante o mandato, com órgão "
+        "do mesmo ente. O mandato é contado de 1º de janeiro do ano seguinte ao da eleição, por "
+        "N anos. Não avalia PEP (não há coleta da rota /peps do Portal da Transparência) nem "
+        "eleito sem CPF divulgado.",
+        "FATF (2011), Laundering the Proceeds of Corruption, § 44 (self-dealing); Velasco et al. "
+        "(2021), seção 3.3. Ligação por sugestão, duração e início do mandato e critério "
+        "territorial do ente: decisão do autor (23/11/2026).",
+        ["cnpj_arquivo", "pncp", "tse_arquivo (candidatos)"],
+        ["l9_anos_mandato", "t9_situacoes_eleito"],
+    ),
     "L10": (
         "H47",
         "Contratada sem sanção própria vigente que divide sócio-administrador provável ou "
@@ -194,6 +208,19 @@ _DESCRICOES: dict[str, tuple[str, str, str, list[str], list[str]]] = {
         "agrupamento por sócio e o limiar: decisão do autor.",
         ["cnpj_arquivo"],
         ["l2_minimo_empresas"],
+    ),
+    "L13": (
+        "H52",
+        "Despesas contratadas de campanha de um candidato com uma empresa que (a) iniciou a "
+        "atividade menos de N dias antes da despesa ou (b) tem CNAE fora da lista de atividades "
+        "típicas de campanha (CNAE principal do cadastro do CNPJ; sem cadastro, o informado na "
+        "prestação de contas). Com a lista vazia, o critério (b) fica desligado. Um alerta por "
+        "candidato e fornecedor, com as despesas somadas. Não avalia os sinais de fachada do "
+        "fornecedor (L1 e L6) nem fornecedor pessoa física.",
+        "Carta Circular BCB nº 4.001/2020, XIV, d. Limiar de dias e lista de atividades: decisão "
+        "do autor (a lista ainda não foi definida).",
+        ["tse_arquivo (despesas contratadas)", "cnpj_arquivo"],
+        ["l13_dias_abertura", "l13_cnaes_campanha"],
     ),
     "L14": (
         "H49",
@@ -264,6 +291,12 @@ _DESCRICAO_PARAMETROS = {
     "l7_dias_apos_abertura": "Dias depois do início da atividade em que a entrada ainda conta "
     "como de fundador.",
     "l7_meses_antes_contrato": "Meses entre a entrada mais recente no quadro e o contrato.",
+    "l9_anos_mandato": "Duração do mandato, em anos, a partir de 1º de janeiro do ano seguinte "
+    "ao da eleição (o mandato de senador, de oito anos, não é tratado à parte).",
+    "l13_dias_abertura": "Dias mínimos entre o início da atividade do fornecedor e a despesa de "
+    "campanha.",
+    "l13_cnaes_campanha": "CNAEs tratados como atividade típica de campanha (código de 7 dígitos "
+    "ou prefixo). Lista vazia = critério do CNAE desligado.",
     "l14_valor_minimo": "Valor contratado mínimo, em reais, somado por empresa.",
     "l14_faixas_atipicas": "Códigos de faixa etária tratados como atípicos (1 = até 12 anos, "
     "2 = 13 a 20, 9 = mais de 80; metadados do CNPJ, nota 4).",

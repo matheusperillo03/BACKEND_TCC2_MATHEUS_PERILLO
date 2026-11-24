@@ -123,6 +123,7 @@ class ColetaEntrada(BaseModel):
         "portal_transparencia",
         "pncp_termos",
         "tse_arquivo",
+        "tse_bens",
         "edital_arquivo",
     ]
     parametros: dict[str, Any] = Field(default_factory=dict, max_length=20)
@@ -365,9 +366,82 @@ class SugestaoSaida(BaseModel):
     candidata_id: str
     candidata_rotulo: str | None
     candidata_identificador: str | None
+    candidata_tipo: str | None = None
     score: float
     motivo: str
     criado_em: str
+    # Decisão do investigador sobre o par (vale nos dois sentidos; nunca funde as entidades).
+    situacao: Literal["pendente", "confirmado", "descartado"] = "pendente"
+    decidido_por: str | None = None
+    decidido_em: str | None = None
+    justificativa_decisao: str | None = None
+
+
+class OutraCandidatura(BaseModel):
+    """Candidatura da mesma pessoa em outra eleição (mesmo título eleitoral, comparado só pelo
+    resumo com chave, que nunca é devolvido)."""
+
+    entidade_id: str
+    rotulo: str
+    ano: str
+    cargo: str
+    uf: str
+    situacao_turno: str
+
+
+class BemDeclarado(BaseModel):
+    ordem: str
+    tipo: str
+    descricao: str
+    valor: float | None
+    atualizado_em: str
+
+
+class BensPorTipo(BaseModel):
+    tipo: str
+    total: float
+    quantidade: int
+
+
+class PontoPatrimonial(BaseModel):
+    """Bens declarados ao TSE numa eleição, com a captura de origem (RNF05)."""
+
+    entidade_id: str
+    rotulo: str
+    ano: str
+    cargo: str
+    uf: str
+    # ``None``: nenhum arquivo de bens coletado para esta candidatura (não é "zero bens").
+    total: float | None
+    quantidade: int
+    por_tipo: list[BensPorTipo]
+    bens: list[BemDeclarado]
+    captura_id: str | None
+    sha256: str | None
+    fonte: str | None
+    url_ou_arquivo: str | None
+
+
+class VariacaoPatrimonial(BaseModel):
+    de_ano: str
+    para_ano: str
+    diferenca: float
+    # ``None`` quando o total anterior é zero.
+    percentual: float | None
+
+
+class RendaPublica(BaseModel):
+    conhecida: bool
+    motivo: str
+
+
+class LinhaDoTempoPatrimonial(BaseModel):
+    entidade_id: str
+    ligacao: Literal["titulo_eleitoral", "candidatura_unica"]
+    nota: str
+    pontos: list[PontoPatrimonial]
+    variacoes: list[VariacaoPatrimonial]
+    renda_publica: RendaPublica
 
 
 class FonteSaida(BaseModel):
@@ -382,6 +456,8 @@ class EntidadeDetalhe(EntidadeResumo):
     captura_id: str
     fontes: list[FonteSaida]
     sugestoes: list[SugestaoSaida]
+    # Só para candidato: as outras candidaturas da mesma pessoa (ligadas pelo título eleitoral).
+    outras_candidaturas: list[OutraCandidatura] = []
 
 
 class NoSaida(BaseModel):
@@ -427,6 +503,8 @@ class ParametrosTipologias(BaseModel):
     l4_minimo_niveis: int | None = Field(default=None, ge=2, le=20)
     l7_dias_apos_abertura: int | None = Field(default=None, ge=0, le=36_500)
     l7_meses_antes_contrato: int | None = Field(default=None, ge=1, le=1_200)
+    l9_anos_mandato: int | None = Field(default=None, ge=1, le=12)
+    l13_dias_abertura: int | None = Field(default=None, ge=0, le=36_500)
     l14_valor_minimo: float | None = Field(default=None, ge=0, le=1e12)
     l15_minimo_cnaes: int | None = Field(default=None, ge=2, le=1_000)
     l15_minimo_categorias: int | None = Field(default=None, ge=2, le=100)
@@ -438,7 +516,7 @@ class ParametrosTipologias(BaseModel):
 
 CodigoTipologia = Literal[
     "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10",
-    "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L10", "L14", "L15", "L16",
+    "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L13", "L14", "L15", "L16",
     "COMB",
 ]  # fmt: skip
 

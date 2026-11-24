@@ -24,6 +24,8 @@ CHAVE_HMAC = "chave-sintetica-de-teste-0123456789abcdef"
 CHAVE = CHAVE_HMAC.encode()
 # Chave mestra sintética da criptografia em repouso (32 bytes em hexadecimal), só para os testes.
 CHAVE_CUSTODIA = "00112233445566778899aabbccddeeff" * 2
+# Chave sintética do resumo de identificadores (título eleitoral), só para os testes.
+CHAVE_IDENTIFICADORES = "0f1e2d3c4b5a69788796a5b4c3d2e1f0" * 2
 # Nome da pasta das fixtures do CNPJ dentro da raiz de ingestão dos testes.
 DIR_CNPJ = "cnpj"
 
@@ -56,6 +58,7 @@ def criar_config(tmp_path: Path, raiz_cnpj: Path | None = None, **extras) -> Con
         "modo_dev": True,
         "auditoria_chave_hmac": CHAVE_HMAC,
         "custodia_chave": CHAVE_CUSTODIA,
+        "chave_identificadores": CHAVE_IDENTIFICADORES,
         "cnpj_dir_base": raiz_cnpj,
         "pncp_espera_retentativa_segundos": 0,
         "coleta_espera_retentativa_segundos": 0,

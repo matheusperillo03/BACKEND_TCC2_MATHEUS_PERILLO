@@ -1,7 +1,8 @@
 name: osint-tcc
 
 # Segredos obrigatórios, sem valor padrão (defina no arquivo .env; ver .env.example):
-#   AUDITORIA_CHAVE_HMAC, CUSTODIA_CHAVE, POSTGRES_PASSWORD e POSTGRES_APP_PASSWORD.
+#   AUDITORIA_CHAVE_HMAC, CUSTODIA_CHAVE, CHAVE_IDENTIFICADORES, POSTGRES_PASSWORD e
+#   POSTGRES_APP_PASSWORD.
 # Sem eles o `docker compose up` para com uma mensagem explicando o que falta.
 # Use senhas hexadecimais (`openssl rand -hex 24`): elas entram na URL de conexão.
 #
@@ -31,6 +32,8 @@ services:
       # Chave mestra da criptografia em repouso (capturas e segredos de TOTP); fica fora do banco.
       CUSTODIA_CHAVE: ${CUSTODIA_CHAVE:?defina CUSTODIA_CHAVE no .env (openssl rand -hex 32; diferente da AUDITORIA_CHAVE_HMAC)}
       CUSTODIA_CHAVES_ANTERIORES: ${CUSTODIA_CHAVES_ANTERIORES:-}
+      # Chave própria do resumo do título eleitoral (liga as candidaturas da mesma pessoa).
+      CHAVE_IDENTIFICADORES: ${CHAVE_IDENTIFICADORES:?defina CHAVE_IDENTIFICADORES no .env (openssl rand -hex 32; diferente das outras chaves)}
       # Tokens fixos: so com MODO_DEV=1. O acesso normal e por usuario real (senha + MFA):
       #   docker compose exec api python -m buscador.usuarios criar <usuario> admin
       MODO_DEV: ${MODO_DEV:-0}

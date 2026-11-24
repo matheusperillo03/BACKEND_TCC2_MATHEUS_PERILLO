@@ -8,6 +8,7 @@ Todas estão em `.env.example`.
 |---|---|---|
 | `TOKENS_DEV` | vazio | **Só com `MODO_DEV=1`.** `token:usuario:perfil`, separados por vírgula. Perfis: `analista`, `delegado`, `admin`. Com `MODO_DEV=0`, precisa ficar vazia: preenchida, impede a inicialização |
 | `CUSTODIA_CHAVE` (ou `CUSTODIA_CHAVE_ARQUIVO`) | **obrigatória, sem padrão** | Chave mestra da criptografia em repouso, 32 bytes em hexadecimal. Fica só no ambiente ou num arquivo, nunca no banco. As demais variáveis do horizonte 3 estão em "Variáveis do horizonte 3", abaixo |
+| `CHAVE_IDENTIFICADORES` | **obrigatória com a fonte do TSE ligada** (`TSE_DIR_BASE`; no Compose ela vem ligada) | Chave própria do resumo de identificadores, 32 bytes em hexadecimal (`openssl rand -hex 32`). O título eleitoral do candidato é guardado só como HMAC-SHA256 com esta chave, que liga as candidaturas da mesma pessoa entre eleições. Não deriva da `CUSTODIA_CHAVE` e não pode ser igual a ela, à `AUDITORIA_CHAVE_HMAC` nem à `IMPORTACAO_JUDICIAL_CHAVE`. Sem ela, com o TSE ligado, o serviço não inicia; com o TSE desligado, pode ficar vazia. Trocar a chave muda os resumos: candidaturas já coletadas deixam de coincidir com as novas até serem recoletadas |
 | `AUDITORIA_CHAVE_HMAC` | **obrigatória, sem padrão** | Chave do HMAC da cadeia de auditoria (mínimo de 32 caracteres). Fica só no ambiente, nunca no banco |
 | `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD` | **obrigatórias no Compose** | Senha do papel dono do banco e senha do papel da aplicação |
 | `MODO_DEV` | `0` | `1` aceita os tokens fixos de `TOKENS_DEV` (sem senha e sem MFA) e liga `/docs`, `/redoc` e `/openapi.json`. Só para a máquina do desenvolvedor: com `URL_PUBLICA` de fora da máquina, o serviço não inicia |
@@ -45,6 +46,7 @@ Todas estão em `.env.example`.
 | `T5_MINIMO_CONTRATACOES`, `T5_CRITERIO_NATUREZA` | `2`, `fornecedor_e_categoria` | Mínimo de contratações somadas e critério de "mesma natureza" |
 | `T8_PERCENTUAL_LIMITE`, `T8_PERCENTUAL_LIMITE_REFORMA` | `25`, `50` | Percentuais do art. 125 |
 | `T9_SITUACOES_ELEITO` | `ELEITO,ELEITO POR QP,ELEITO POR MÉDIA` | Situações de totalização que contam como eleito |
+| `L9_ANOS_MANDATO`, `L13_DIAS_ABERTURA`, `L13_CNAES_CAMPANHA` | `4`, `180`, vazio | L9: duração do mandato, em anos, contada de 1º de janeiro do ano seguinte ao da eleição. L13: dias mínimos entre o início da atividade do fornecedor e a despesa de campanha, e CNAEs típicos de campanha (por vírgula; código de 7 dígitos ou prefixo de 2 a 6). Lista vazia deixa o critério do CNAE desligado (ver [tipologias.md](tipologias.md)) |
 | `T10_EXPRESSOES_EXTRAS` | vazio | Expressões regulares extras, separadas por `;;` (até 20, de até 200 caracteres) |
 | `MONITORAMENTO_AGENDADOR_ATIVO`, `MONITORAMENTO_INTERVALO_SEGUNDOS`, `MONITORAMENTO_PERIODICIDADE_MINIMA_HORAS` | `1`, `60`, `1` | Agendador interno |
 

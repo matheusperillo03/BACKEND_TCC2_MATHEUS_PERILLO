@@ -109,6 +109,11 @@ class Configuracao(BaseSettings):
     # Chaves mestras anteriores (hexadecimal, separadas por vírgula): só para LER o que foi
     # cifrado antes de uma troca de chave.
     custodia_chaves_anteriores: str = ""
+    # Chave própria do resumo de identificadores (32 bytes em hexadecimal): o título eleitoral
+    # do candidato é guardado só como HMAC com esta chave, que reconhece a mesma pessoa entre
+    # eleições. Não deriva da chave da custódia nem pode repeti-la. Obrigatória quando a ligação
+    # está em uso (fonte do TSE ligada, TSE_DIR_BASE).
+    chave_identificadores: str = ""
 
     # ---- Usuários, MFA e sessão (RNF01, H23) --------------------------------------------------
     # Perfis para os quais o segundo fator (TOTP, RFC 6238) é obrigatório.
@@ -273,6 +278,16 @@ class Configuracao(BaseSettings):
     # L7 (fundadores substituídos): tolerância depois do início e janela antes do contrato.
     l7_dias_apos_abertura: int = Field(default=30, ge=0, le=36_500)
     l7_meses_antes_contrato: int = Field(default=12, ge=1, le=1_200)
+    # L9 (eleito possivelmente sócio de contratada do próprio ente): duração do mandato, em anos,
+    # contada de 1º de janeiro do ano seguinte ao da eleição (decisão do autor; o mandato de
+    # senador, de oito anos, não é tratado à parte). "Eleito" segue ``T9_SITUACOES_ELEITO``.
+    l9_anos_mandato: int = Field(default=4, ge=1, le=12)
+    # L13 (despesa de campanha com fornecedor de perfil incompatível): dias mínimos entre o
+    # início da atividade do fornecedor e a despesa (padrão igual ao da T1; decisão do autor) e
+    # CNAEs típicos de campanha, por vírgula (código de 7 dígitos ou prefixo de 2 a 6). A lista é
+    # DECISÃO DO AUTOR AINDA NÃO TOMADA: vazia (padrão) deixa o critério do CNAE desligado.
+    l13_dias_abertura: int = Field(default=180, ge=0, le=36_500)
+    l13_cnaes_campanha: str = ""
     # L14 (sinal fraco): valor contratado mínimo e faixas etárias atípicas (códigos do layout).
     l14_valor_minimo: float = Field(default=100_000.0, ge=0, le=1e12, allow_inf_nan=False)
     l14_faixas_atipicas: str = "1,2,9"
@@ -460,6 +475,46 @@ class Configuracao(BaseSettings):
             )
         return cripto.Cofre(chave, anteriores)
 
+    def ligacao_de_pessoas_em_uso(self) -> bool:
+        """A ligação de candidaturas pelo título eleitoral acontece na coleta do TSE."""
+        return self.tse_dir_base is not None
+
+    def chave_dos_identificadores(self) -> bytes:
+        """Chave do resumo de identificadores (título eleitoral). Própria: nunca a da custódia
+        nem a da auditoria. Fica só no ambiente, nunca no banco."""
+        if not self.chave_identificadores.strip():
+            raise ErroConfiguracao(
+                "CHAVE_IDENTIFICADORES é obrigatória quando a fonte do TSE está ligada "
+                "(TSE_DIR_BASE): é a chave de 32 bytes em hexadecimal do resumo do título "
+                "eleitoral, que liga as candidaturas da mesma pessoa (`openssl rand -hex 32`). "
+                "Ela é própria: não pode ser a CUSTODIA_CHAVE nem a AUDITORIA_CHAVE_HMAC."
+            )
+        try:
+            chave = cripto.interpretar_chave(self.chave_identificadores, "CHAVE_IDENTIFICADORES")
+        except cripto.ErroCripto as erro:
+            raise ErroConfiguracao(str(erro)) from erro
+        usadas = {self.custodia_chave.strip().lower(), self.auditoria_chave_hmac.strip().lower()}
+        usadas |= {c.strip().lower() for c in self.custodia_chaves_anteriores.split(",")}
+        usadas.add(self.importacao_judicial_chave.strip().lower())
+        if self.custodia_chave_arquivo is not None:
+            try:
+                usadas.add(cripto.ler_chave_de_arquivo(self.custodia_chave_arquivo).hex())
+            except cripto.ErroCripto:
+                pass
+        if chave.hex() in usadas:
+            raise ErroConfiguracao(
+                "CHAVE_IDENTIFICADORES não pode ser igual à chave da custódia, à da auditoria "
+                "nem à da importação judicial: o resumo dos identificadores tem chave própria."
+            )
+        return chave
+
+    def resumidor_de_titulo(self):
+        """Função que resume um título eleitoral (texto só de dígitos) com a chave própria."""
+        chave = self.chave_dos_identificadores()
+        return lambda titulo: cripto.resumo_identificador(
+            chave, "titulo-eleitoral", titulo.encode("ascii")
+        )
+
     def perfis_com_mfa(self) -> frozenset[str]:
         perfis = {p.strip() for p in self.mfa_perfis_obrigatorios.split(",") if p.strip()}
         desconhecidos = perfis - set(PERFIS)
@@ -586,6 +641,8 @@ class Configuracao(BaseSettings):
         self.host_publico()
         self.chave_auditoria()
         self.cofre()
+        if self.ligacao_de_pessoas_em_uso() or self.chave_identificadores.strip():
+            self.chave_dos_identificadores()
         self.perfis_com_mfa()
         self.validar_ia()
         self.validar_importacao_judicial()
@@ -632,6 +689,7 @@ class Configuracao(BaseSettings):
                 self.l16_naturezas_sem_fins_lucrativos, "L16_NATUREZAS_SEM_FINS_LUCRATIVOS"
             )
             pesos = combinacao.pesos(self.comb_pesos)
+            cnaes_campanha = lavagem.lista_de_cnaes(self.l13_cnaes_campanha, "L13_CNAES_CAMPANHA")
         except ValueError as erro:
             raise ErroConfiguracao(str(erro)) from erro
         return {
@@ -645,6 +703,9 @@ class Configuracao(BaseSettings):
             "l4_minimo_niveis": self.l4_minimo_niveis,
             "l7_dias_apos_abertura": self.l7_dias_apos_abertura,
             "l7_meses_antes_contrato": self.l7_meses_antes_contrato,
+            "l9_anos_mandato": self.l9_anos_mandato,
+            "l13_dias_abertura": self.l13_dias_abertura,
+            "l13_cnaes_campanha": cnaes_campanha,
             "l14_valor_minimo": self.l14_valor_minimo,
             "l14_faixas_atipicas": faixas,
             "l15_minimo_cnaes": self.l15_minimo_cnaes,

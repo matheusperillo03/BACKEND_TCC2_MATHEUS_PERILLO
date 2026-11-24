@@ -311,7 +311,7 @@ def test_do_caso_filtra_as_receitas_pelos_candidatos_do_caso(tmp_path):
         captura = cliente.get(f"/capturas/{coleta['captura_ids'][0]}", headers=cabecalhos()).json()
         assert captura["url_ou_arquivo"].endswith("#recorte")
         assert captura["metadados"]["recorte"]["linhas_mantidas"] == 100
-        assert captura["conector_versao"] == "1.1.0"
+        assert captura["conector_versao"] == "1.2.0"
         verificacao = cliente.get(
             f"/capturas/{captura['id']}/verificar", headers=cabecalhos()
         ).json()

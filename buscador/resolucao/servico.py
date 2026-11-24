@@ -52,9 +52,11 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from buscador.conectores.base import (
     Registro,
+    RegistroBem,
     RegistroCandidato,
     RegistroContrato,
     RegistroConvenio,
+    RegistroDespesa,
     RegistroDoacao,
     RegistroEdital,
     RegistroEmpresa,
@@ -83,7 +85,16 @@ from buscador.resolucao.normalizacao import (
 # Campos dos registros que carregam o documento em si: seguem como vieram até a resolução, que
 # guarda o CNPJ inteiro e, do CPF, só a forma descaracterizada (``mascarar_cpf``).
 _CAMPOS_DE_DOCUMENTO = frozenset(
-    {"ni_fornecedor", "cnpj_cpf_socio", "cpf", "documento_doador", "representante_legal"}
+    {
+        "ni_fornecedor",
+        "cnpj_cpf_socio",
+        "cpf",
+        "documento_doador",
+        "representante_legal",
+        # Já reduzidos pelo conector do TSE: seis dígitos do CPF e resumo do título eleitoral.
+        "cpf_parcial",
+        "titulo_resumo",
+    }
 )
 
 
@@ -141,7 +152,13 @@ TIPOS_ARESTA = (
     # Convênio do Portal da Transparência (L16): convenente e órgão concedente.
     "convenente_de",
     "concedente_de",
+    # Despesa contratada de campanha (TSE, L13): candidato -> empresa fornecedora.
+    "despesa_de_campanha",
 )
+# Sugestão de candidato x sócio ou servidor: os mesmos seis dígitos visíveis do CPF e o mesmo
+# nome normalizado (decisão do autor, 23/11/2026). O valor é o das outras possíveis coincidências
+# entre origens diferentes.
+SCORE_CANDIDATO_PESSOA = 0.9
 PREFIXO_SERVIDOR = "servidor:"
 PREFIXO_DOADOR = "doador:"
 PREFIXO_EXPULSO = "expulso:"
@@ -162,6 +179,8 @@ _ORDEM = {
     RegistroSimples: 10,
     RegistroExpulsao: 11,
     RegistroConvenio: 12,
+    RegistroBem: 13,
+    RegistroDespesa: 14,
 }
 
 
@@ -185,6 +204,8 @@ class Resolvedor:
         self._sugestoes: set[tuple[str, str]] = set()
         self._fontes: set[tuple[str, str]] = set()
         self._pessoas_por_nome: dict[str, list[Entidade]] = {}
+        # Candidatos com CPF descaracterizado, por (nome normalizado, seis dígitos).
+        self._candidatos_por_pessoa: dict[tuple[str, str], list[Entidade]] = {}
         self._nomes_no_limite: set[str] = set()
         self._carregar()
 
@@ -197,6 +218,8 @@ class Resolvedor:
             self._entidades[(e.tipo, e.chave)] = e
             if e.tipo == "pessoa":
                 self._indexar_pessoa(e)
+            elif e.tipo == "candidato":
+                self._indexar_candidato(e)
         for entidade_id, captura_id in self.sessao.execute(
             select(EntidadeFonte.entidade_id, EntidadeFonte.captura_id)
             .join(Entidade, Entidade.id == EntidadeFonte.entidade_id)
@@ -216,6 +239,52 @@ class Resolvedor:
         nome = (pessoa.atributos or {}).get("nome_normalizado") or ""
         if nome:
             self._pessoas_por_nome.setdefault(nome, []).append(pessoa)
+
+    def _indexar_candidato(self, candidato: Entidade) -> None:
+        atributos = candidato.atributos or {}
+        marca = (atributos.get("nome_normalizado") or "", atributos.get("cpf_mascarado") or "")
+        if all(marca) and candidato not in self._candidatos_por_pessoa.setdefault(marca, []):
+            self._candidatos_por_pessoa[marca].append(candidato)
+
+    def _sugerir_par(self, a: Entidade, b: Entidade, score: float, motivo: str) -> None:
+        """Sugestão nos dois sentidos do par, sem repetir a que já existe."""
+        for origem, destino in ((a.id, b.id), (b.id, a.id)):
+            if (origem, destino) in self._sugestoes:
+                continue
+            self.sessao.add(
+                Sugestao(
+                    caso_id=self.caso_id,
+                    entidade_id=origem,
+                    candidata_id=destino,
+                    score=score,
+                    motivo=motivo,
+                )
+            )
+            self._sugestoes.add((origem, destino))
+            self.estatisticas.sugestoes_novas += 1
+
+    def _sugerir_candidato_pessoa(self, candidato: Entidade, pessoa: Entidade) -> None:
+        """Candidato x sócio ou servidor (H46, H51; decisão do autor, 23/11/2026): só sugestão,
+        que o investigador confirma ou descarta. Doador e pessoa expulsa ficam de fora (a
+        ligação doador-servidor é a H53, que não entra nesta entrega)."""
+        if pessoa.chave.startswith((PREFIXO_DOADOR, PREFIXO_EXPULSO)):
+            return
+        atributos = pessoa.atributos or {}
+        papel = (
+            "servidor"
+            if pessoa.chave.startswith(PREFIXO_SERVIDOR)
+            else "sócio ou fornecedor pessoa física"
+        )
+        self._sugerir_par(
+            candidato,
+            pessoa,
+            SCORE_CANDIDATO_PESSOA,
+            f"Possível coincidência entre candidato e {papel}: mesmo nome normalizado "
+            f"'{atributos.get('nome_normalizado')}' e mesmos seis dígitos visíveis do CPF "
+            f"({atributos.get('cpf_mascarado')}). Seis dígitos e o nome não identificam uma "
+            "pessoa: é uma sugestão para o investigador confirmar ou descartar, e os registros "
+            "não foram fundidos.",
+        )
 
     def _obter_ou_criar(
         self,
@@ -333,6 +402,10 @@ class Resolvedor:
                 self._expulsao(registro)
             elif isinstance(registro, RegistroConvenio):
                 self._convenio(registro)
+            elif isinstance(registro, RegistroBem):
+                self._bem(registro)
+            elif isinstance(registro, RegistroDespesa):
+                self._despesa(registro)
         self._derivar_mesmo_endereco()
         self.sessao.flush()
         return self.estatisticas
@@ -479,6 +552,8 @@ class Resolvedor:
         if nova:
             self._sugerir_homonimos(entidade, nome_norm, cpf)
             self._indexar_pessoa(entidade)
+            for candidato in self._candidatos_por_pessoa.get((nome_norm, cpf), []) if cpf else []:
+                self._sugerir_candidato_pessoa(candidato, entidade)
         elif atributos:
             self._atualizar(entidade, captura_id, **atributos)
         return entidade
@@ -960,7 +1035,11 @@ class Resolvedor:
             "sg_ue": r.sg_ue,
             "nm_ue": r.nm_ue,
             "situacao_turno": r.situacao_turno,
+            "nome_normalizado": normalizar_nome(r.nome),
         }
+        if mascarar_cpf(r.cpf_parcial):
+            # Só os seis dígitos centrais (o conector descarta o resto na leitura).
+            atributos["cpf_mascarado"] = mascarar_cpf(r.cpf_parcial)
         candidato, novo = self._obter_ou_criar(
             "candidato",
             f"{r.ano}:{r.sq_candidato}",
@@ -982,20 +1061,97 @@ class Resolvedor:
                 self._atualizar(candidato, r.captura_id, **escrever)
             if r.nome and r.origem == "consulta_cand":
                 candidato.rotulo = r.nome
+        if r.titulo_resumo and candidato.chave_pessoa != r.titulo_resumo:
+            # Resumo com chave do título: liga as candidaturas da mesma pessoa, sem fundi-las.
+            candidato.chave_pessoa = r.titulo_resumo
+        self._ligar_candidato_a_pessoas(candidato)
         return candidato
 
-    def _doacao(self, r: RegistroDoacao) -> None:
-        candidato = self._entidades.get(("candidato", f"{r.ano}:{r.sq_candidato}"))
+    def _ligar_candidato_a_pessoas(self, candidato: Entidade) -> None:
+        atributos = candidato.atributos or {}
+        nome, cpf = atributos.get("nome_normalizado") or "", atributos.get("cpf_mascarado") or ""
+        if not (nome and cpf):
+            return
+        self._indexar_candidato(candidato)
+        for pessoa in self._pessoas_por_nome.get(nome, []):
+            if (pessoa.atributos or {}).get("cpf_mascarado") == cpf:
+                self._sugerir_candidato_pessoa(candidato, pessoa)
+
+    def _candidato_da_eleicao(self, ano: str, sq: str, nome: str, captura_id: str) -> Entidade:
+        """O candidato daquela eleição; se o arquivo de candidatos ainda não foi coletado, cria
+        a entidade só com o que o arquivo de receitas, de bens ou de despesas traz."""
+        candidato = self._entidades.get(("candidato", f"{ano}:{sq}"))
         if candidato is None:
             candidato = self._candidato(
                 RegistroCandidato(
-                    captura_id=r.captura_id,
-                    ano=r.ano,
-                    sq_candidato=r.sq_candidato,
-                    nome=r.nome_candidato,
-                    origem="receitas",
+                    captura_id=captura_id, ano=ano, sq_candidato=sq, nome=nome, origem="receitas"
                 )
             )
+        return candidato
+
+    def _bem(self, r: RegistroBem) -> None:
+        """Bem declarado ao TSE (H50): fica na candidatura daquela eleição (``SQ_CANDIDATO``),
+        por número de ordem, de modo que recoletar o arquivo não duplica. Os totais são
+        recalculados a cada bem; o valor é o declarado pelo candidato."""
+        candidato = self._candidato_da_eleicao(r.ano, r.sq_candidato, "", r.captura_id)
+        self._registrar_fonte(candidato, r.captura_id, "bens")
+        por_ordem = {str(b.get("ordem")): b for b in (candidato.atributos or {}).get("bens") or []}
+        por_ordem[r.ordem] = {
+            "ordem": r.ordem,
+            "tipo": r.tipo,
+            "codigo_tipo": r.codigo_tipo,
+            "descricao": r.descricao,
+            "valor": r.valor,
+            "atualizado_em": r.atualizado_em,
+        }
+        bens = sorted(por_ordem.values(), key=lambda b: (len(str(b["ordem"])), str(b["ordem"])))
+        por_tipo: dict[str, float] = {}
+        for bem in bens:
+            if bem["valor"] is not None:
+                tipo = bem["tipo"] or "Tipo não informado"
+                por_tipo[tipo] = round(por_tipo.get(tipo, 0.0) + float(bem["valor"]), 2)
+        self._atualizar(
+            candidato,
+            r.captura_id,
+            bens=bens,
+            bens_quantidade=len(bens),
+            bens_total=round(sum(por_tipo.values()), 2),
+            bens_por_tipo=por_tipo,
+        )
+
+    def _despesa(self, r: RegistroDespesa) -> None:
+        """Despesa contratada de campanha (H52): candidato -> empresa fornecedora."""
+        candidato = self._candidato_da_eleicao(
+            r.ano, r.sq_candidato, r.nome_candidato, r.captura_id
+        )
+        documento = limpar_documento(r.cnpj_fornecedor)
+        if not normalizar_cnpj(documento):
+            return
+        fornecedor = self._empresa_por_basico(
+            documento[:8], r.nome_fornecedor, r.captura_id, "fornecedor_campanha"
+        )
+        self._aresta(
+            candidato,
+            fornecedor,
+            "despesa_de_campanha",
+            r.captura_id,
+            chave=r.chave,
+            atributos={
+                "valor": r.valor,
+                "data": r.data,
+                "ano": r.ano,
+                "descricao": r.descricao,
+                # CNAE que a prestação de contas informa para o fornecedor.
+                "cnae_fornecedor": r.cnae,
+                "cnae_fornecedor_descricao": r.cnae_descricao,
+                "cnpj_fornecedor": documento,
+            },
+        )
+
+    def _doacao(self, r: RegistroDoacao) -> None:
+        candidato = self._candidato_da_eleicao(
+            r.ano, r.sq_candidato, r.nome_candidato, r.captura_id
+        )
         documento = limpar_documento(r.documento_doador)
         nome = r.nome_doador_rfb or r.nome_doador
         if normalizar_cnpj(documento):

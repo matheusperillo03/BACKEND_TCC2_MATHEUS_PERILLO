@@ -29,7 +29,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from buscador.documentos import DocumentoRecusado, LimitesPdf, extrair_texto
-from buscador.modelos import Alerta, Aresta, Captura, Caso, Entidade
+from buscador.modelos import Alerta, Aresta, Captura, Caso, Entidade, Sugestao
 from buscador.privacidade import descaracterizar_texto
 from buscador.seguranca import numero_finito
 from buscador.tipologias import politicas
@@ -57,6 +57,8 @@ NOMES_PARAMETROS = (
     "l4_minimo_niveis",
     "l7_dias_apos_abertura",
     "l7_meses_antes_contrato",
+    "l9_anos_mandato",
+    "l13_dias_abertura",
     "l14_valor_minimo",
     "l15_minimo_cnaes",
     "l15_minimo_categorias",
@@ -119,6 +121,9 @@ class Contexto:
     ler_captura: Callable[[Captura], bytes] | None = None
     # Limites da extração de texto de PDF (``None`` = padrões de ``LimitesPdf``).
     limites_pdf: LimitesPdf | None = None
+    # Sugestões de resolução do caso (a L9 lê as de candidato x sócio e a decisão do
+    # investigador sobre cada par).
+    sugestoes: list[Sugestao] = field(default_factory=list)
     # Avisos da execução: o que uma tipologia deixou de avaliar por falta de dado (frases
     # curtas, sem dado pessoal). ``executar`` grava no caso, por tipologia.
     avisos: list[str] = field(default_factory=list)
@@ -645,6 +650,8 @@ _LIMITES_PARAMETROS = {
     "l4_minimo_niveis": (2, 20),
     "l7_dias_apos_abertura": (0, 36_500),
     "l7_meses_antes_contrato": (1, 1_200),
+    "l9_anos_mandato": (1, 12),
+    "l13_dias_abertura": (0, 36_500),
     "l14_valor_minimo": (0.0, 1e12),
     "l15_minimo_cnaes": (2, 1_000),
     "l15_minimo_categorias": (2, 100),
@@ -695,10 +702,16 @@ def carregar_contexto(
     capturas = {
         c.id: c for c in sessao.execute(select(Captura).where(Captura.caso_id == caso_id)).scalars()
     }
+    sugestoes = list(
+        sessao.execute(
+            select(Sugestao).where(Sugestao.caso_id == caso_id).order_by(Sugestao.id)
+        ).scalars()
+    )
     return Contexto(
         entidades=entidades,
         arestas=arestas,
         capturas=capturas,
+        sugestoes=sugestoes,
         ler_captura=ler_captura,
         limites_pdf=limites_pdf,
     )

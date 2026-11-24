@@ -129,6 +129,16 @@ As rotas `/auth/*` não pedem `X-Justificativa`. Todas as demais continuam pedin
 
 Ações novas na auditoria: `auth.senha_aceita`, `auth.login`, `auth.login_falhou`, `auth.mfa_falhou`, `auth.logout`, `auth.trocar_senha`, `auth.troca_de_senha_falhou`, `auth.sessao_script`, `usuario.criar`, `usuario.alterar`, `usuario.listar`, `acesso.perfil_negado`, `caso.acesso_negado`, `membro.listar`, `membro.definir`, `membro.remover`, `anotacao.criar`, `anotacao.listar`, `tarefa.criar`, `tarefa.alterar`, `tarefa.ver`, `tarefa.listar`, `exportacao.gerar`, `captura.texto`, `ia.extrair`, `ia.listar_extracoes`, `ia.listar_sugestoes` e `ia.sugestao_decidir`. Em 18/11/2026 (extração em segundo plano): `ia.extrair` passa a registrar o **pedido**; o desfecho é gravado pelo trabalhador, como usuário de sistema `extrator`, em `ia.extracao_concluida` (sucesso ou concluída com falhas), `ia.extracao_falha`, `ia.extracao_cancelada` ou `ia.extracao_interrompida`; e há `ia.extracao_cancelar`, `ia.extracao_retomar` e `ia.consultar_extracao`.
 
+## Ligação de pessoas e linha do tempo patrimonial (23/11/2026)
+
+| Método e rota | Descrição |
+|---|---|
+| `POST /casos/{id}/coletas` **(alterado)** | `fonte` aceita também `tse_bens` (ver [conectores.md](conectores.md)) |
+| `GET /casos/{id}/entidades/{eid}` **(alterado)** | Cada sugestão ganha `candidata_tipo`, `situacao` (`pendente`, `confirmado` ou `descartado`), `decidido_por`, `decidido_em` e `justificativa_decisao`. No candidato, `outras_candidaturas` lista as candidaturas da mesma pessoa em outras eleições (`entidade_id`, `rotulo`, `ano`, `cargo`, `uf`, `situacao_turno`), ligadas pelo resumo do título eleitoral, que nunca é devolvido |
+| `POST /casos/{id}/sugestoes/{sid}/decisao` (nova) | `{"decisao":"confirmado"\|"descartado","justificativa"}`. A decisão vale para o par (os dois sentidos da sugestão), entra na auditoria (`sugestao.decidir`) e **não funde** as entidades. Rever é uma nova decisão |
+| `GET /casos/{id}/entidades/{eid}/patrimonio` (nova) | Linha do tempo patrimonial do candidato (RF05): `pontos` (um por eleição, com `total`, `quantidade`, `por_tipo`, `bens` e a captura de origem; `total` nulo quando não há arquivo de bens coletado), `variacoes` entre eleições, `ligacao` (`titulo_eleitoral` ou `candidatura_unica`), `nota` e `renda_publica` (`conhecida: false`: o sistema não coleta remuneração, então não há alerta de evolução patrimonial). Entidade que não é candidato: `422`. Auditoria: `patrimonio.ver` |
+| `POST /casos/{id}/alertas/executar` **(alterado)** | `tipologias` aceita `L9` e `L13`; `parametros` aceita `l9_anos_mandato` e `l13_dias_abertura` |
+
 ## Importação sob ordem judicial
 
 As rotas `/importacao-judicial/*` estão em [importacao-judicial.md](importacao-judicial.md).
