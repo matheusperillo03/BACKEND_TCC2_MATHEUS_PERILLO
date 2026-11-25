@@ -32,6 +32,14 @@ from buscador.documentos import DocumentoRecusado, LimitesPdf, extrair_texto
 from buscador.modelos import Alerta, Aresta, Captura, Caso, Entidade, Sugestao
 from buscador.privacidade import descaracterizar_texto
 from buscador.seguranca import numero_finito
+from buscador.situacao_cadastral import (
+    SITUACAO_ATIVA,
+    SITUACOES_CADASTRAIS,
+    enderecos_em_uso,
+    rotulo_situacao,
+    situacao_nao_informada,
+)
+from buscador.situacao_cadastral import codigo_situacao as _codigo_situacao
 from buscador.tipologias import politicas
 
 registro = logging.getLogger(__name__)
@@ -303,19 +311,8 @@ def tipologia_t1(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 # ---- T2: endereço compartilhado ---------------------------------------------------------------
 
 
-def _situacao_conta_na_t2(est: dict) -> bool:
-    """Só o estabelecimento ATIVO (código 02) conta no endereço. Código reconhecível e diferente
-    de 02 (nula, suspensa, inapta, baixada) fica de fora. Sem código informado não se sabe se o
-    estabelecimento deixou de existir: pela política de erro da T2 (prefere evitar falso
-    negativo) ele continua contando, e o alerta diz que a situação não foi informada."""
-    codigo = _codigo_situacao(est.get("situacao_cadastral"))
-    return codigo is None or codigo == SITUACAO_ATIVA
-
-
-def _rotulo_situacao_t2(est: dict) -> str:
-    if _codigo_situacao(est.get("situacao_cadastral")) is None:
-        return "situação não informada"
-    return "situação ATIVA"
+# Quais estabelecimentos contam no endereço: ``buscador.situacao_cadastral`` (critério único,
+# o mesmo da L1, da aresta ``mesmo_endereco`` e do sinal (d) da L16).
 
 
 def tipologia_t2(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
@@ -326,11 +323,8 @@ def tipologia_t2(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
     for e in ctx.entidades.values():
         if e.tipo != "empresa":
             continue
-        for est in (e.atributos or {}).get("estabelecimentos", []):
-            chave = est.get("endereco_normalizado")
-            # Chave vazia (endereço em branco ou só com a cidade) não identifica um lugar.
-            if chave and _situacao_conta_na_t2(est):
-                por_endereco.setdefault(chave, {}).setdefault(e.id, (e, []))[1].append(est)
+        for chave, ests in enderecos_em_uso(e.atributos).items():
+            por_endereco.setdefault(chave, {})[e.id] = (e, ests)
 
     def regra(grupo: tuple[str, dict[str, tuple[Entidade, list[dict]]]]) -> AlertaDetectado | None:
         chave, por_empresa = grupo
@@ -342,11 +336,7 @@ def tipologia_t2(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
         if not com_contrato:
             return None
         legivel = next((est["endereco"] for _, ests in pares for est in ests), chave)
-        sem_situacao = sum(
-            _codigo_situacao(est.get("situacao_cadastral")) is None
-            for _, ests in pares
-            for est in ests
-        )
+        sem_situacao = sum(situacao_nao_informada(est) for _, ests in pares for est in ests)
         nomes = "; ".join(f"{e.rotulo} (CNPJ básico {e.identificador})" for e in empresas)
         nomes_contratadas = ", ".join(e.rotulo for e in com_contrato)
         motivo = (
@@ -370,7 +360,7 @@ def tipologia_t2(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
                     ctx.evidencia(
                         est["captura_id"],
                         f"Estabelecimento {est['cnpj']} de {e.rotulo} no endereço "
-                        f"'{est['endereco']}', {_rotulo_situacao_t2(est)} "
+                        f"'{est['endereco']}', {rotulo_situacao(est)} "
                         "(dados abertos do CNPJ, Estabelecimentos)",
                     )
                 )
@@ -470,17 +460,8 @@ def tipologia_t3(ctx: Contexto, parametros: dict) -> list[AlertaDetectado]:
 
 # ---- T4: empresa contratada sem situação cadastral ativa (H31) ---------------------------------
 
-# Códigos do campo "SITUAÇÃO CADASTRAL" da tabela Estabelecimentos no layout oficial dos dados
-# abertos do CNPJ: "01 – NULA, 2 – ATIVA, 3 – SUSPENSA, 4 – INAPTA, 08 – BAIXADA" (metadados do
-# CNPJ, Receita Federal, https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf, conferido em
-# 16/11/2026). O arquivo traz o código com ou sem zero à esquerda, por isso a comparação é numérica.
-SITUACOES_CADASTRAIS = {1: "NULA", 2: "ATIVA", 3: "SUSPENSA", 4: "INAPTA", 8: "BAIXADA"}
-SITUACAO_ATIVA = 2
-
-
-def _codigo_situacao(valor: object) -> int | None:
-    texto = str(valor or "").strip()
-    return int(texto) if texto.isdigit() else None
+# Os códigos da situação cadastral (``SITUACOES_CADASTRAIS``, ``SITUACAO_ATIVA``) e a leitura do
+# campo estão em ``buscador.situacao_cadastral``.
 
 
 def _estabelecimento_do_contrato(empresa: Entidade, contrato: Entidade) -> dict | None:

@@ -10,6 +10,9 @@ Regras:
 - Arestas: ``socio_de`` (sócio -> empresa), ``contratado_por`` (fornecedor -> órgão),
   ``fornecedor_de`` (fornecedor -> contrato), ``contratante_de`` (órgão -> contrato) e
   ``mesmo_endereco`` (empresa <-> empresa, derivada do endereço normalizado do estabelecimento).
+  Só o estabelecimento ATIVO ou sem situação informada liga duas empresas (o mesmo critério da
+  T2, em ``buscador.situacao_cadastral``); a aresta guarda em ``estabelecimentos_sem_situacao``
+  quantos dos estabelecimentos do par vieram sem situação.
 
 Horizonte 2 (H19):
 - Termo de contrato: não é entidade; entra na lista ``termos`` dos atributos do contrato.
@@ -81,6 +84,7 @@ from buscador.resolucao.normalizacao import (
     normalizar_endereco,
     normalizar_nome,
 )
+from buscador.situacao_cadastral import enderecos_em_uso, situacao_nao_informada
 
 # Campos dos registros que carregam o documento em si: seguem como vieram até a resolução, que
 # guarda o CNPJ inteiro e, do CPF, só a forma descaracterizada (``mascarar_cpf``).
@@ -1211,18 +1215,20 @@ class Resolvedor:
     # ---- Derivadas ----------------------------------------------------------------------------
 
     def _derivar_mesmo_endereco(self) -> None:
-        por_endereco: dict[str, list[Entidade]] = {}
+        # endereço -> (empresa, estabelecimentos dela que contam naquele endereço). Estabelecimento
+        # baixado, inapto, suspenso ou nulo não liga empresas; chave vazia também não.
+        por_endereco: dict[str, list[tuple[Entidade, list[dict]]]] = {}
         for (tipo, _), e in self._entidades.items():
             if tipo != "empresa":
                 continue
-            for chave in (e.atributos or {}).get("enderecos_normalizados", []):
-                # Chave vazia (endereço em branco ou só com a cidade) nunca liga empresas.
-                if chave:
-                    por_endereco.setdefault(chave, []).append(e)
-        for chave_endereco, empresas in por_endereco.items():
-            if len(empresas) < 2:
+            for chave, ests in enderecos_em_uso(e.atributos).items():
+                por_endereco.setdefault(chave, []).append((e, ests))
+        for chave_endereco, grupo in por_endereco.items():
+            if len(grupo) < 2:
                 continue
-            empresas = sorted(empresas, key=lambda e: e.chave)
+            grupo = sorted(grupo, key=lambda par: par[0].chave)
+            contam = {e.id: ests for e, ests in grupo}
+            empresas = [e for e, _ in grupo]
             if len(empresas) > self.max_grupo:
                 # Grupo grande: estrela (n-1 arestas, todas verdadeiras) em vez de n(n-1)/2 pares.
                 pares = [(empresas[0], b) for b in empresas[1:]]
@@ -1235,30 +1241,24 @@ class Resolvedor:
             else:
                 pares = [(a, b) for i, a in enumerate(empresas) for b in empresas[i + 1 :]]
             for a, b in pares:
+                # A captura e o endereço legível vêm de um estabelecimento que conta, não de um
+                # baixado que por acaso esteja no mesmo endereço.
+                primeiro = contam[a.id][0]
                 self._aresta(
                     a,
                     b,
                     "mesmo_endereco",
-                    self._captura_do_endereco(a, chave_endereco),
+                    primeiro["captura_id"],
                     chave=chave_endereco,
                     atributos={
                         "endereco_normalizado": chave_endereco,
-                        "endereco": self._endereco_legivel(a, chave_endereco),
+                        "endereco": primeiro["endereco"],
                         "derivada": True,
                         "grupo_em_estrela": len(empresas) > self.max_grupo,
+                        # Estabelecimentos do par, neste endereço, sem situação cadastral na
+                        # fonte: contaram, mas não se sabe se ainda existem.
+                        "estabelecimentos_sem_situacao": sum(
+                            situacao_nao_informada(est) for est in contam[a.id] + contam[b.id]
+                        ),
                     },
                 )
-
-    @staticmethod
-    def _captura_do_endereco(empresa: Entidade, chave_endereco: str) -> str:
-        for est in (empresa.atributos or {}).get("estabelecimentos", []):
-            if est.get("endereco_normalizado") == chave_endereco:
-                return est["captura_id"]
-        return empresa.captura_id
-
-    @staticmethod
-    def _endereco_legivel(empresa: Entidade, chave_endereco: str) -> str:
-        for est in (empresa.atributos or {}).get("estabelecimentos", []):
-            if est.get("endereco_normalizado") == chave_endereco:
-                return est["endereco"]
-        return chave_endereco
